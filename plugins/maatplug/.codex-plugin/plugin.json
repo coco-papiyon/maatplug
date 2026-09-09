@@ -1,0 +1,20 @@
+{
+  "name": "maatplug",
+  "version": "0.1.0",
+  "description": "Record Codex prompts, token usage, and per-turn source changes for the maatplug dashboard.",
+  "author": {
+    "name": "coco-papiyon",
+    "url": "https://github.com/coco-papiyon"
+  },
+  "homepage": "https://github.com/coco-papiyon/maatplug",
+  "repository": "https://github.com/coco-papiyon/maatplug",
+  "keywords": ["codex", "analytics", "usage", "git-diff"],
+  "interface": {
+    "displayName": "maatplug",
+    "shortDescription": "Track Codex usage and source changes",
+    "longDescription": "Records Codex sessions, user prompts, best-effort token usage, and per-turn source-code changes in maatplug's local JSONL store for CLI and Web reporting.",
+    "developerName": "coco-papiyon",
+    "category": "Developer Tools",
+    "capabilities": ["Hooks"]
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "description": "Record Codex activity in maatplug's local data store.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "^(startup|resume|clear)$",
+        "hooks": [{ "type": "command", "command": "maatplug hook codex --event SessionStart", "timeout": 30 }]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [{ "type": "command", "command": "maatplug hook codex --event UserPromptSubmit", "timeout": 30 }]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [{ "type": "command", "command": "maatplug hook codex --event Stop", "timeout": 30 }]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [{ "type": "command", "command": "maatplug hook codex --event SessionEnd", "timeout": 3 }]
+      }
+    ]
+  }
+}
