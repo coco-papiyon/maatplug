@@ -1,0 +1,50 @@
+{
+  "duration_api_ms": 3786,
+  "duration_ms": 4201,
+  "stop_reason": "end_turn",
+  "session_id": "session-claude-001",
+  "total_cost_usd": 0.0263238,
+  "usage": {
+    "input_tokens": 3,
+    "cache_creation_input_tokens": 15876,
+    "cache_read_input_tokens": 0,
+    "output_tokens": 8,
+    "output_tokens_details": {},
+    "server_tool_use": {},
+    "service_tier": "standard",
+    "cache_creation": {},
+    "inference_geo": "not_available",
+    "iterations": [],
+    "speed": "standard"
+  },
+  "modelUsage": {
+    "claude-sonnet-5": {
+      "inputTokens": 3,
+      "outputTokens": 8,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 15876,
+      "webSearchRequests": 0,
+      "costUSD": 0.0263238,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-sonnet-5",
+      "provider": "firstParty",
+      "costBasis": "api"
+    }
+  },
+  "permission_denials": [],
+  "terminal_reason": "end_turn",
+  "fast_mode_state": "off",
+  "fast_mode_disabled_reason": null,
+  "subagent_stats": null,
+  "is_error": false,
+  "num_turns": 1,
+  "subtype": "success",
+  "api_error_status": null,
+  "result": "<redacted:assistant-message>",
+  "type": "result",
+  "uuid": "result-claude-001",
+  "queued_turn_count": 0
+}
+

@@ -14,6 +14,12 @@ func usageLine(input, output, cacheRead, cacheCreation int) transcriptLine {
 	return l
 }
 
+func keyedUsageLine(id string, input, output, cacheRead, cacheCreation int) transcriptLine {
+	l := usageLine(input, output, cacheRead, cacheCreation)
+	l.Message.ID = id
+	return l
+}
+
 // toolResultLine simulates a tool_result message, which Claude Code records
 // as type:"user" (it's a user-role message per the Anthropic Messages API)
 // but tags with a toolUseResult field the real human prompt never has.
@@ -43,6 +49,98 @@ func TestSumSinceLastRealPrompt_SumsMultipleAssistantTurns(t *testing.T) {
 	}
 	if got.Total != 168 {
 		t.Fatalf("Total = %d, want 168", got.Total)
+	}
+}
+
+func TestSumSinceLastRealPrompt_DeduplicatesContentBlockLinesByMessageID(t *testing.T) {
+	lines := []transcriptLine{
+		realPromptLine(),
+		keyedUsageLine("msg-1", 2, 278, 36_341, 12_566), // thinking block
+		keyedUsageLine("msg-1", 2, 278, 36_341, 12_566), // tool_use block from the same response
+		keyedUsageLine("msg-2", 2, 186, 48_907, 518),    // a genuinely separate API response
+	}
+
+	got := sumSinceLastRealPrompt(lines)
+	if got == nil {
+		t.Fatal("sumSinceLastRealPrompt() = nil, want a usage total")
+	}
+	if got.Input != 4 || got.Output != 464 || got.CacheRead != 85_248 || got.CacheCreation != 13_084 {
+		t.Fatalf("got %+v, want each API message counted exactly once", got)
+	}
+	if got.Total != 98_800 {
+		t.Fatalf("Total = %d, want 98800", got.Total)
+	}
+}
+
+func TestSumSinceLastRealPrompt_DeduplicatesObservedTranscriptJSONShape(t *testing.T) {
+	rawLines := []string{
+		`{"type":"user","message":{"role":"user","content":"fix it"}}`,
+		`{"type":"assistant","uuid":"row-thinking","requestId":"req-1","message":{"id":"msg-1","role":"assistant","content":[{"type":"thinking","thinking":"..."}],"usage":{"input_tokens":2,"cache_creation_input_tokens":12566,"cache_read_input_tokens":36341,"output_tokens":278}}}`,
+		`{"type":"assistant","uuid":"row-tool","requestId":"req-1","message":{"id":"msg-1","role":"assistant","content":[{"type":"tool_use","id":"tool-1","name":"Bash"}],"usage":{"input_tokens":2,"cache_creation_input_tokens":12566,"cache_read_input_tokens":36341,"output_tokens":278}}}`,
+	}
+	lines := make([]transcriptLine, 0, len(rawLines))
+	for _, raw := range rawLines {
+		var line transcriptLine
+		if err := json.Unmarshal([]byte(raw), &line); err != nil {
+			t.Fatal(err)
+		}
+		lines = append(lines, line)
+	}
+
+	got := sumSinceLastRealPrompt(lines)
+	if got == nil || got.Input != 2 || got.Output != 278 || got.CacheRead != 36_341 || got.CacheCreation != 12_566 || got.Total != 49_187 {
+		t.Fatalf("got %+v, want the repeated observed API response counted once", got)
+	}
+}
+
+func TestSumSinceLastRealPrompt_DoesNotDeduplicateDistinctMessageIDs(t *testing.T) {
+	lines := []transcriptLine{
+		realPromptLine(),
+		keyedUsageLine("msg-1", 10, 5, 100, 50),
+		keyedUsageLine("msg-2", 10, 5, 100, 50),
+	}
+
+	got := sumSinceLastRealPrompt(lines)
+	if got == nil || got.Total != 330 {
+		t.Fatalf("got %+v, want two distinct responses totaling 330", got)
+	}
+}
+
+func TestSumSinceLastRealPrompt_UsesLatestUsageForSameMessageID(t *testing.T) {
+	lines := []transcriptLine{
+		realPromptLine(),
+		keyedUsageLine("msg-1", 1, 2, 3, 4),
+		keyedUsageLine("msg-1", 10, 20, 30, 40),
+	}
+
+	got := sumSinceLastRealPrompt(lines)
+	if got == nil || got.Input != 10 || got.Output != 20 || got.CacheRead != 30 || got.CacheCreation != 40 || got.Total != 100 {
+		t.Fatalf("got %+v, want the latest complete usage for msg-1", got)
+	}
+}
+
+func TestSumSinceLastRealPrompt_DeduplicatesByRequestIDWhenMessageIDMissing(t *testing.T) {
+	first := usageLine(3, 4, 5, 6)
+	first.RequestID = "req-1"
+	second := first
+	lines := []transcriptLine{realPromptLine(), first, second}
+
+	got := sumSinceLastRealPrompt(lines)
+	if got == nil || got.Total != 18 {
+		t.Fatalf("got %+v, want requestId fallback counted once", got)
+	}
+}
+
+func TestSumSinceLastRealPrompt_CountsUnkeyedLinesSeparately(t *testing.T) {
+	lines := []transcriptLine{
+		realPromptLine(),
+		usageLine(1, 2, 3, 4),
+		usageLine(1, 2, 3, 4),
+	}
+
+	got := sumSinceLastRealPrompt(lines)
+	if got == nil || got.Total != 20 {
+		t.Fatalf("got %+v, want unidentifiable responses retained rather than under-counted", got)
 	}
 }
 

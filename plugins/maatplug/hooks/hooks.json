@@ -12,6 +12,36 @@
         "hooks": [{ "type": "command", "command": "maatplug hook codex --event UserPromptSubmit", "timeout": 30 }]
       }
     ],
+    "PreToolUse": [
+      {
+        "hooks": [{ "type": "command", "command": "maatplug hook codex --event PreToolUse", "timeout": 30 }]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [{ "type": "command", "command": "maatplug hook codex --event PermissionRequest", "timeout": 30 }]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [{ "type": "command", "command": "maatplug hook codex --event PostToolUse", "timeout": 30 }]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [{ "type": "command", "command": "maatplug hook codex --event SubagentStart", "timeout": 30 }]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [{ "type": "command", "command": "maatplug hook codex --event SubagentStop", "timeout": 30 }]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [{ "type": "command", "command": "maatplug hook codex --event PreCompact", "timeout": 30 }]
+      }
+    ],
     "Stop": [
       {
         "hooks": [{ "type": "command", "command": "maatplug hook codex --event Stop", "timeout": 30 }]

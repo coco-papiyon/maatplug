@@ -33,7 +33,14 @@ const (
 // older than lockStaleAfter is assumed abandoned by a crashed process and is
 // broken rather than waited on forever.
 func WithSessionLock(sessionPath string, fn func() error) error {
-	path := lockPath(sessionPath)
+	return WithFileLock(sessionPath, fn)
+}
+
+// WithFileLock serializes a read-decide-write sequence for one logical file.
+// Different target paths use different locks and therefore do not block one
+// another. WithSessionLock remains as the legacy call-site name.
+func WithFileLock(targetPath string, fn func() error) error {
+	path := lockPath(targetPath)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create lock dir: %w", err)
 	}
@@ -59,7 +66,10 @@ func acquireLock(path string) error {
 			f.Close()
 			return nil
 		}
-		if !errors.Is(err, os.ErrExist) {
+		// Windows may report ERROR_ACCESS_DENIED rather than
+		// ERROR_FILE_EXISTS while another goroutine owns a CREATE_NEW file.
+		// Both mean contention for this known lock path and should retry.
+		if !errors.Is(err, os.ErrExist) && !errors.Is(err, os.ErrPermission) {
 			return fmt.Errorf("create lock file %s: %w", path, err)
 		}
 

@@ -23,7 +23,9 @@ type transcriptLine struct {
 	Type          string          `json:"type"`
 	IsSidechain   bool            `json:"isSidechain"`
 	ToolUseResult json.RawMessage `json:"toolUseResult,omitempty"`
+	RequestID     string          `json:"requestId"`
 	Message       struct {
+		ID      string          `json:"id"`
 		Role    string          `json:"role"`
 		Model   string          `json:"model"`
 		Content json.RawMessage `json:"content"`
@@ -69,10 +71,13 @@ const (
 	transcriptPollAttempts = 15 // ~3s total, per docs/design.md section 12 (async transcript write lag)
 )
 
-// sumTurnTokens sums the usage of every non-sidechain assistant line after
-// the most recent real human prompt line in the transcript — i.e. every
-// model response across the whole turn, including the assistant messages
-// sandwiched between tool calls and their tool_result "user" lines.
+// sumTurnTokens sums the usage of every distinct non-sidechain assistant API
+// response after the most recent real human prompt line in the transcript.
+// Claude Code can serialize one API response as several assistant lines (for
+// example separate thinking and tool_use content blocks). Those lines carry
+// the same message.id/requestId and repeat the response's complete usage, so
+// they must be counted once rather than once per content block. Distinct API
+// responses around tool calls are still all included.
 //
 // Claude Code writes the transcript file asynchronously, so lines for the
 // turn that just finished may not have fully landed yet when Stop fires.
@@ -190,23 +195,66 @@ func sumSinceLastRealPrompt(lines []transcriptLine) *model.TokenUsage {
 		return nil
 	}
 
-	var usage model.TokenUsage
+	// Later copies of the same API message are authoritative. Real Claude
+	// transcripts normally repeat identical usage, but replacing rather than
+	// adding also handles a future/older writer that emits an early partial
+	// record followed by a completed one.
+	keyed := make(map[string]model.TokenUsage)
+	var unkeyed []model.TokenUsage
 	found := false
 	for _, l := range lines[idx+1:] {
 		if !isAssistantResponse(l) {
 			continue
 		}
 		found = true
-		usage.Input += l.Message.Usage.InputTokens
-		usage.Output += l.Message.Usage.OutputTokens
-		usage.CacheRead += l.Message.Usage.CacheReadInputTokens
-		usage.CacheCreation += l.Message.Usage.CacheCreationInputTokens
+		lineUsage := model.TokenUsage{
+			Input:         l.Message.Usage.InputTokens,
+			Output:        l.Message.Usage.OutputTokens,
+			CacheRead:     l.Message.Usage.CacheReadInputTokens,
+			CacheCreation: l.Message.Usage.CacheCreationInputTokens,
+		}
+		if key := assistantUsageKey(l); key != "" {
+			keyed[key] = lineUsage
+		} else {
+			// Without a provider identifier there is no safe way to prove two
+			// lines are the same response. Count both to avoid under-reporting
+			// real calls in old or changed transcript formats.
+			unkeyed = append(unkeyed, lineUsage)
+		}
 	}
 	if !found {
 		return nil
 	}
+
+	var usage model.TokenUsage
+	add := func(u model.TokenUsage) {
+		usage.Input += u.Input
+		usage.Output += u.Output
+		usage.CacheRead += u.CacheRead
+		usage.CacheCreation += u.CacheCreation
+	}
+	for _, u := range keyed {
+		add(u)
+	}
+	for _, u := range unkeyed {
+		add(u)
+	}
 	usage.Total = usage.Input + usage.Output + usage.CacheRead + usage.CacheCreation
 	return &usage
+}
+
+// assistantUsageKey identifies the API response whose complete usage is
+// repeated on each serialized content-block line. message.id is the primary
+// Anthropic response identifier; requestId is a best-effort fallback observed
+// in Claude Code transcripts. Prefixes keep the two namespaces distinct.
+func assistantUsageKey(l transcriptLine) string {
+	if l.Message.ID != "" {
+		return "message:" + l.Message.ID
+	}
+	if l.RequestID != "" {
+		return "request:" + l.RequestID
+	}
+	return ""
 }
 
 // lastModelSinceLastRealPrompt returns the model field of the turn's last

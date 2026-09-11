@@ -20,6 +20,7 @@ type DailyPoint struct {
 	Date        string  `json:"date"`
 	CostUSD     float64 `json:"costUsd"`
 	TotalTokens int     `json:"totalTokens"`
+	CostMissing bool    `json:"costMissing"`
 }
 
 // Trend buckets recorded activity by day for the web dashboard's cost/token
@@ -85,6 +86,8 @@ func Trend(s *store.Store, projectID string, filter Filter) ([]DailyPoint, error
 				point.TotalTokens += ev.Tokens.Total
 				if cost, ok := costFor(pricingDoc, provider, ev.Model, ev.Tokens); ok {
 					point.CostUSD += cost
+				} else {
+					point.CostMissing = true
 				}
 			}
 		}

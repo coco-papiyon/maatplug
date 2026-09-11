@@ -1,15 +1,8 @@
-// Package pricing scrapes each provider's public pricing/docs page for
-// current per-model USD-per-million-token rates, and reads/writes the flat
-// JSON config file cmd/maatplug-pricing-fetch produces from that data.
-//
-// There is no stable structured pricing API for either provider (see
-// FetchClaude and FetchCodex's doc comments), so every fetch is inherently
-// best-effort: a page redesign can silently return zero results. The
-// fetch-and-merge policy (cmd/maatplug-pricing-fetch/main.go) is: try a live
-// fetch; on failure, keep whatever was already on record for that provider;
-// if nothing was ever recorded either, leave it empty. This package itself
-// only fetches/parses one provider's page at a time and does not implement
-// that merge policy — see the cmd for that.
+// Package pricing acquires Provider pricing, stores immutable versions and
+// source snapshots, and resolves rates by model, service, contract, usage
+// class, effective interval, quantity, currency, and additional conditions.
+// The Document and ModelPricing types remain the acquisition format used by
+// the existing public-page parsers and build-time pricing fetch command.
 package pricing
 
 import (
@@ -31,8 +24,9 @@ type ModelPricing struct {
 	CacheWritePerMillion float64 `json:"cacheWritePerMillion"`
 	OutputPerMillion     float64 `json:"outputPerMillion"`
 
-	SourceURL   string    `json:"sourceUrl"`
-	RetrievedAt time.Time `json:"retrievedAt"`
+	SourceURL         string    `json:"sourceUrl"`
+	RetrievedAt       time.Time `json:"retrievedAt"`
+	AcquisitionIssues []string  `json:"acquisitionIssues,omitempty"`
 }
 
 // Document is the on-disk config file schema cmd/maatplug-pricing-fetch
@@ -54,9 +48,8 @@ func (d Document) ForProvider(provider string) []ModelPricing {
 	return out
 }
 
-// Lookup returns the ModelPricing on record for an exact provider/model
-// pair. Model ids are provider-specific to begin with, so an exact match is
-// the right join key — there's no cross-provider ambiguity to resolve.
+// Lookup supports the legacy embedded reference-price view. Phase 5 event
+// costing uses Version.Resolve instead so all rate conditions are evaluated.
 func (d Document) Lookup(provider, model string) (ModelPricing, bool) {
 	for _, m := range d.Models {
 		if m.Provider == provider && m.Model == model {

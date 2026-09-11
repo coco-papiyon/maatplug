@@ -71,7 +71,7 @@ func Breakdown(s *store.Store, projectID string, filter Filter, dimension Breakd
 
 	pricingDoc := loadPricing()
 	byCategory := map[string]map[string]*DailyPoint{} // category -> day -> point
-	add := func(category, day string, tokens int, cost float64) {
+	add := func(category, day string, tokens int, cost float64, costMissing bool) {
 		days, ok := byCategory[category]
 		if !ok {
 			days = map[string]*DailyPoint{}
@@ -84,6 +84,7 @@ func Breakdown(s *store.Store, projectID string, filter Filter, dimension Breakd
 		}
 		point.TotalTokens += tokens
 		point.CostUSD += cost
+		point.CostMissing = point.CostMissing || costMissing
 	}
 
 	for _, id := range projectIDs {
@@ -116,24 +117,27 @@ func Breakdown(s *store.Store, projectID string, filter Filter, dimension Breakd
 				switch dimension {
 				case BreakdownTokenType:
 					var inCost, cacheCost, outCost float64
+					missing := false
 					if rate, ok := pricingDoc.Lookup(provider, ev.Model); ok {
 						inCost = rate.Cost(ev.Tokens.Input, 0, 0, 0)
 						cacheCost = rate.Cost(0, ev.Tokens.CacheRead, ev.Tokens.CacheCreation, 0)
 						outCost = rate.Cost(0, 0, 0, ev.Tokens.Output)
+					} else {
+						missing = true
 					}
-					add("in", day, ev.Tokens.Input, inCost)
-					add("cache", day, ev.Tokens.CacheRead+ev.Tokens.CacheCreation, cacheCost)
-					add("out", day, ev.Tokens.Output, outCost)
+					add("in", day, ev.Tokens.Input, inCost, missing && ev.Tokens.Input != 0)
+					add("cache", day, ev.Tokens.CacheRead+ev.Tokens.CacheCreation, cacheCost, missing && ev.Tokens.CacheRead+ev.Tokens.CacheCreation != 0)
+					add("out", day, ev.Tokens.Output, outCost, missing && ev.Tokens.Output != 0)
 				case BreakdownModel:
 					key := ev.Model
 					if key == "" {
 						key = "unknown"
 					}
-					cost, _ := costFor(pricingDoc, provider, ev.Model, ev.Tokens)
-					add(key, day, ev.Tokens.Total, cost)
+					cost, priced := costFor(pricingDoc, provider, ev.Model, ev.Tokens)
+					add(key, day, ev.Tokens.Total, cost, !priced && ev.Tokens.Total != 0)
 				default: // BreakdownProvider
-					cost, _ := costFor(pricingDoc, provider, ev.Model, ev.Tokens)
-					add(provider, day, ev.Tokens.Total, cost)
+					cost, priced := costFor(pricingDoc, provider, ev.Model, ev.Tokens)
+					add(provider, day, ev.Tokens.Total, cost, !priced && ev.Tokens.Total != 0)
 				}
 			}
 		}
@@ -222,6 +226,7 @@ func rankAndFoldModelCategories(byCategory map[string]map[string]*DailyPoint) []
 			}
 			existing.CostUSD += point.CostUSD
 			existing.TotalTokens += point.TotalTokens
+			existing.CostMissing = existing.CostMissing || point.CostMissing
 		}
 	}
 	byCategory[breakdownOtherKey] = other

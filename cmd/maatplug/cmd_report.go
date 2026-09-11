@@ -7,13 +7,12 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"maatplug/internal/aggregate"
+	"maatplug/internal/query"
 	"maatplug/internal/store"
 )
 
 // runReport prints the same summaries as status, either as a table or as
-// JSON for scripting (and, later, a starting point for whatever
-// internal/aggregate's TypeScript port emits for the VSCode extension).
+// JSON for scripting. Both formats use the same query service as the Web API.
 func runReport(args []string) error {
 	fs := flag.NewFlagSet("report", flag.ContinueOnError)
 	project := fs.String("project", "", "limit to a single project id")
@@ -27,7 +26,7 @@ func runReport(args []string) error {
 		return err
 	}
 
-	summaries, err := summariesFor(s, *project)
+	summaries, err := summariesFor(query.New(s.Root), *project)
 	if err != nil {
 		return err
 	}
@@ -42,24 +41,24 @@ func runReport(args []string) error {
 	}
 }
 
-func printJSON(summaries []aggregate.ProjectSummary) error {
+func printJSON(summaries []query.ProjectSummary) error {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(summaries)
 }
 
-func printTable(summaries []aggregate.ProjectSummary) error {
+func printTable(summaries []query.ProjectSummary) error {
 	if len(summaries) == 0 {
 		fmt.Println("no recorded activity yet")
 		return nil
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(w, "PROJECT\tSESSIONS\tINSTRUCTIONS\tTOKENS\t+LINES\t-LINES\tABANDONED")
+	fmt.Fprintln(w, "PROJECT\tSESSIONS\tRUNS\tINSTRUCTIONS\tKNOWN\tSHARED\tUNATTRIBUTED\tUNCALCULATED\tOPERATIONS")
 	for _, sum := range summaries {
-		fmt.Fprintf(w, "%s\t%d\t%d\t%d\t%d\t%d\t%d\n",
-			displayName(sum), sum.Sessions, sum.Instructions, sum.TotalTokens, sum.LinesAdded, sum.LinesRemoved,
-			sum.AbandonedInstructions)
+		fmt.Fprintf(w, "%s\t%d\t%d\t%d\t%d\t%d\t%d\t%t\t%d\n",
+			displayName(sum), sum.Sessions, sum.Runs, sum.Instructions, sum.Usage.KnownSubtotal,
+			sum.Usage.SharedUnallocated, sum.Usage.UnattributedTokens, sum.Usage.Unknown || sum.CostMissing, sum.Operations)
 	}
 	return w.Flush()
 }

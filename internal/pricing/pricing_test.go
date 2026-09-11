@@ -2,6 +2,7 @@ package pricing
 
 import (
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -44,7 +45,7 @@ func TestSaveThenLoad_RoundTrips(t *testing.T) {
 		t.Fatalf("len(Models) = %d, want %d", len(got.Models), len(want.Models))
 	}
 	for i := range want.Models {
-		if got.Models[i] != want.Models[i] {
+		if !reflect.DeepEqual(got.Models[i], want.Models[i]) {
 			t.Errorf("Models[%d] = %+v, want %+v", i, got.Models[i], want.Models[i])
 		}
 	}

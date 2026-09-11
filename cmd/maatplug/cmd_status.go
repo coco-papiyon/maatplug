@@ -4,7 +4,7 @@ import (
 	"flag"
 	"fmt"
 
-	"maatplug/internal/aggregate"
+	"maatplug/internal/query"
 	"maatplug/internal/store"
 )
 
@@ -23,7 +23,7 @@ func runStatus(args []string) error {
 		return err
 	}
 
-	summaries, err := summariesFor(s, *project)
+	summaries, err := summariesFor(query.New(s.Root), *project)
 	if err != nil {
 		return err
 	}
@@ -33,8 +33,8 @@ func runStatus(args []string) error {
 	}
 
 	for _, sum := range summaries {
-		fmt.Printf("%s  sessions=%d  instructions=%d  tokens=%d  +%d/-%d lines%s\n",
-			displayName(sum), sum.Sessions, sum.Instructions, sum.TotalTokens, sum.LinesAdded, sum.LinesRemoved,
+		fmt.Printf("%s  sessions=%d  runs=%d  instructions=%d  known=%d  shared=%d  unattributed=%d  uncomputed=%t  operations=%d%s\n",
+			displayName(sum), sum.Sessions, sum.Runs, sum.Instructions, sum.Usage.KnownSubtotal, sum.Usage.SharedUnallocated, sum.Usage.UnattributedTokens, sum.Usage.Unknown || sum.CostMissing, sum.Operations,
 			abandonedSuffix(sum))
 	}
 	return nil
@@ -43,25 +43,25 @@ func runStatus(args []string) error {
 // abandonedSuffix flags projects that have unmeasured (abandoned) turns, so
 // the totals above are never silently mistaken for "fully measured, and it
 // came out to this" — see docs/design.md section 6.1.
-func abandonedSuffix(sum aggregate.ProjectSummary) string {
-	if sum.AbandonedInstructions == 0 {
+func abandonedSuffix(sum query.ProjectSummary) string {
+	if sum.AbandonedInstructions == nil || *sum.AbandonedInstructions == 0 {
 		return ""
 	}
-	return fmt.Sprintf("  (%d unmeasured/abandoned)", sum.AbandonedInstructions)
+	return fmt.Sprintf("  (%d unmeasured/abandoned)", *sum.AbandonedInstructions)
 }
 
-func summariesFor(s *store.Store, projectID string) ([]aggregate.ProjectSummary, error) {
+func summariesFor(service *query.Service, projectID string) ([]query.ProjectSummary, error) {
 	if projectID != "" {
-		sum, err := aggregate.Project(s, projectID, aggregate.Filter{})
+		sum, err := service.Project(projectID, query.Filter{})
 		if err != nil {
 			return nil, err
 		}
-		return []aggregate.ProjectSummary{sum}, nil
+		return []query.ProjectSummary{sum}, nil
 	}
-	return aggregate.All(s, aggregate.Filter{})
+	return service.ListProjects(query.Filter{})
 }
 
-func displayName(sum aggregate.ProjectSummary) string {
+func displayName(sum query.ProjectSummary) string {
 	if sum.Name != "" {
 		return sum.Name
 	}

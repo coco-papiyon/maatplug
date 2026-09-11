@@ -6,15 +6,12 @@ import (
 	"io"
 	"os"
 
-	"maatplug/internal/provider/claude"
-	"maatplug/internal/provider/codex"
-	"maatplug/internal/recorder"
+	"maatplug/internal/ingest"
 	"maatplug/internal/store"
 )
 
-// runHook implements `maatplug hook <provider> --event <Name>`: it is the
-// short-lived process Claude Code's hooks spawn per docs/design.md section
-// 3.1 — read stdin, record one event, exit.
+// runHook is deliberately short-lived: it only commits the provider payload
+// to the inbox. Parsing and all other durable writes happen in collect.
 func runHook(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("usage: maatplug hook <provider> --event <Name>")
@@ -27,18 +24,10 @@ func runHook(args []string) error {
 		return err
 	}
 
-	switch provider {
-	case "claude":
-		return runClaudeHook(*event)
-	case "codex":
-		return runCodexHook(*event)
-	default:
+	if provider != "claude" && provider != "codex" {
 		return fmt.Errorf("unsupported provider %q (want \"claude\" or \"codex\")", provider)
 	}
-}
-
-func runCodexHook(event string) error {
-	if event == "" {
+	if *event == "" {
 		return fmt.Errorf("--event is required")
 	}
 	stdin, err := io.ReadAll(os.Stdin)
@@ -49,24 +38,6 @@ func runCodexHook(event string) error {
 	if err != nil {
 		return err
 	}
-	return codex.NewHandler(recorder.New(s)).Handle(event, stdin)
-}
-
-func runClaudeHook(event string) error {
-	if event == "" {
-		return fmt.Errorf("--event is required")
-	}
-
-	stdin, err := io.ReadAll(os.Stdin)
-	if err != nil {
-		return fmt.Errorf("read stdin: %w", err)
-	}
-
-	s, err := store.New()
-	if err != nil {
-		return err
-	}
-
-	handler := claude.NewHandler(recorder.New(s))
-	return handler.Handle(event, stdin)
+	_, err = ingest.New(s.Root).EnqueueHook(provider, *event, stdin)
+	return err
 }

@@ -1,6 +1,8 @@
-// Package model defines the flat-file JSONL event schema shared by every
-// provider adapter, the CLI, the web app, and (eventually) the VSCode
-// extension. See docs/design.md section 5.2 for the schema this mirrors.
+// Package model defines maatplug's provider-independent event contract.
+// EventEnvelope in event.go is the version 1 contract. The projection types
+// in this file keep the current recorder and reports building until their
+// Phase 2 and Phase 3 migrations; they are not part of event.schema.json and
+// no compatibility reader or dual writer is provided for them.
 package model
 
 import "time"

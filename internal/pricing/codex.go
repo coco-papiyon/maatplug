@@ -60,10 +60,13 @@ func FetchCodex(ctx context.Context) ([]ModelPricing, error) {
 		detailURL := strings.TrimRight(CodexSourceURL, "/") + "/" + models[i].Model
 		detailHTML, fetchErr := fetchRaw(ctx, detailURL)
 		if fetchErr != nil {
+			models[i].AcquisitionIssues = append(models[i].AcquisitionIssues, "cache_read_input: "+fetchErr.Error())
 			continue
 		}
 		if cached, ok := parseCodexCachedInput(detailHTML); ok {
 			models[i].CachedInputPerMillion = cached
+		} else {
+			models[i].AcquisitionIssues = append(models[i].AcquisitionIssues, "cache_read_input: rate not recognized on detail page")
 		}
 	}
 	return models, nil

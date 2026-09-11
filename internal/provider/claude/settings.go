@@ -9,7 +9,22 @@ import (
 
 // hookEvents are the Claude Code hook events maatplug registers itself
 // against. See docs/design.md section 6.1.
-var hookEvents = []string{"SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"}
+var hookEvents = []string{
+	"SessionStart",
+	"UserPromptSubmit",
+	"PreToolUse",
+	"PermissionRequest",
+	"PermissionDenied",
+	"PostToolUse",
+	"PostToolUseFailure",
+	"SubagentStart",
+	"SubagentStop",
+	"FileChanged",
+	"PreCompact",
+	"PostCompact",
+	"Stop",
+	"SessionEnd",
+}
 
 // commandFor returns the exact command maatplug registers for a hook event,
 // so registration and duplicate-detection agree on the same string.

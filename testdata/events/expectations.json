@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "id": "01-multiple-model-attempts",
+      "knownUsageTokens": 210,
+      "unknownUsage": false,
+      "selectedEventIds": ["01-usage-failed", "01-usage-success"],
+      "excludedEventIds": [],
+      "notes": ["failed attempts remain attributable and are not assumed to be free", "actual model is retained per call"]
+    },
+    {
+      "id": "02-duplicate-and-correction",
+      "knownUsageTokens": 110,
+      "unknownUsage": false,
+      "selectedEventIds": ["02-usage-corrected"],
+      "excludedEventIds": ["02-usage-provisional", "02-usage-duplicate"],
+      "notes": ["raw candidates remain stored", "adoption determines the aggregate"]
+    },
+    {
+      "id": "03-cumulative-reset",
+      "knownUsageTokens": 0,
+      "unknownUsage": true,
+      "selectedEventIds": [],
+      "excludedEventIds": [],
+      "availability": {"/payload/normalized": "unknown"},
+      "notes": ["no delta is synthesized without a baseline", "generation changes at reset"]
+    },
+    {
+      "id": "04-parent-child-usage",
+      "knownUsageTokens": 40,
+      "unknownUsage": true,
+      "selectedEventIds": ["04-usage-child"],
+      "excludedEventIds": [],
+      "notes": ["parent-child topology does not imply usage containment", "parent total remains unresolved"]
+    },
+    {
+      "id": "05-shared-concurrent-instructions",
+      "knownUsageTokens": 0,
+      "unknownUsage": true,
+      "selectedEventIds": [],
+      "excludedEventIds": [],
+      "notes": ["both instructions remain issued", "shared attribution is not forced into either instruction"]
+    },
+    {
+      "id": "06-truncated-tool-output",
+      "knownUsageTokens": 25,
+      "unknownUsage": false,
+      "selectedEventIds": ["06-usage"],
+      "excludedEventIds": [],
+      "notes": ["raw output and transformed model input have separate content IDs", "reasoning tokens remain a subset"]
+    },
+    {
+      "id": "07-operation-lifecycle",
+      "knownUsageTokens": 0,
+      "unknownUsage": false,
+      "selectedEventIds": [],
+      "excludedEventIds": [],
+      "operationState": "failed",
+      "notes": ["denial and partial asynchronous failure remain separate states"]
+    },
+    {
+      "id": "08-network-destination",
+      "knownUsageTokens": 0,
+      "unknownUsage": false,
+      "selectedEventIds": [],
+      "excludedEventIds": [],
+      "availability": {"/payload/observedTarget": "unavailable"},
+      "notes": ["requested destination is not relabeled as the observed destination"]
+    },
+    {
+      "id": "09-missing-end-delayed-usage",
+      "knownUsageTokens": 30,
+      "unknownUsage": true,
+      "selectedEventIds": ["09-usage-late"],
+      "excludedEventIds": [],
+      "operationState": "pending",
+      "notes": ["late usage is accepted while completion remains missing"]
+    },
+    {
+      "id": "10-ingest-stop-rotation",
+      "knownUsageTokens": 0,
+      "unknownUsage": false,
+      "selectedEventIds": [],
+      "excludedEventIds": [],
+      "notes": ["cursor zero is distinct from a missing cursor", "stream generation identifies rotation"]
+    },
+    {
+      "id": "11-pricing-history-failure",
+      "knownUsageTokens": 0,
+      "unknownUsage": false,
+      "selectedEventIds": [],
+      "excludedEventIds": [],
+      "availability": {"/pricing/current": "conflict"},
+      "notes": ["previous effective price remains available", "fetch failure does not create a zero price"]
+    },
+    {
+      "id": "12-billing-scope-refund",
+      "knownUsageTokens": 0,
+      "unknownUsage": false,
+      "selectedEventIds": [],
+      "excludedEventIds": [],
+      "notes": ["subscription charge and refund are spend events, not token-derived estimates", "coverage can include out-of-scope usage"]
+    },
+    {
+      "id": "13-concurrent-artifacts-time",
+      "knownUsageTokens": 0,
+      "unknownUsage": false,
+      "selectedEventIds": [],
+      "excludedEventIds": [],
+      "notes": ["net artifact state does not claim gross edits", "overlapping wall time is not added"]
+    },
+    {
+      "id": "14-content-retention",
+      "knownUsageTokens": 0,
+      "unknownUsage": false,
+      "selectedEventIds": [],
+      "excludedEventIds": [],
+      "availability": {"/payload/content/0": "unavailable"},
+      "notes": ["omitted and deleted content remain distinguishable"]
+    },
+    {
+      "id": "15-format-cutover",
+      "knownUsageTokens": 0,
+      "unknownUsage": false,
+      "selectedEventIds": [],
+      "excludedEventIds": [],
+      "notes": ["old and new stream generations have an explicit cutover", "unknown old records remain diagnostic evidence"]
+    }
+  ]
+}

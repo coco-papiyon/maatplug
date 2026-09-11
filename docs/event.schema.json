@@ -1,0 +1,1227 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://maatplug.local/schema/event-v1.json",
+  "title": "maatplug provider-independent event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "eventId",
+    "eventType",
+    "source",
+    "time",
+    "scope",
+    "payload"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "eventId": {
+      "$ref": "#/$defs/namespacedId"
+    },
+    "eventType": {
+      "enum": [
+        "instruction.recorded",
+        "actor.observed",
+        "model.call",
+        "model.attempt",
+        "usage.reported",
+        "input.observed",
+        "operation.requested",
+        "approval.resolved",
+        "operation.result",
+        "state.changed",
+        "artifact.observed",
+        "pricing.published",
+        "spend.reported",
+        "collection.state"
+      ]
+    },
+    "source": {
+      "$ref": "#/$defs/eventSource"
+    },
+    "time": {
+      "$ref": "#/$defs/eventTime"
+    },
+    "sequence": {
+      "$ref": "#/$defs/eventSequence"
+    },
+    "scope": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/entityRef"
+      }
+    },
+    "availability": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/fieldAvailability"
+      }
+    },
+    "relations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/relation"
+      }
+    },
+    "revision": {
+      "$ref": "#/$defs/revision"
+    },
+    "adoption": {
+      "$ref": "#/$defs/adoption"
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "instruction.recorded"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/instructionPayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "actor.observed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/actorPayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "model.call"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/modelCallPayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "model.attempt"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/modelAttemptPayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "usage.reported"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/usagePayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "input.observed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/inputPayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "operation.requested"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/operationPayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "approval.resolved"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/approvalPayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "operation.result"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/operationResultPayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "state.changed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/statePayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "artifact.observed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/artifactPayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "pricing.published"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/pricingPayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "spend.reported"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/spendPayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "collection.state"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/collectionStatePayload"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "namespacedId": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "namespace",
+        "value"
+      ],
+      "properties": {
+        "namespace": {
+          "type": "string",
+          "minLength": 1
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "entityRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "id"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "id": {
+          "$ref": "#/$defs/namespacedId"
+        }
+      }
+    },
+    "eventSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "surface",
+        "kind"
+      ],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "minLength": 1
+        },
+        "surface": {
+          "type": "string",
+          "minLength": 1
+        },
+        "surfaceVersion": {
+          "type": "string"
+        },
+        "engineVersion": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "recordId": {
+          "$ref": "#/$defs/namespacedId"
+        }
+      }
+    },
+    "eventTime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "receivedAt"
+      ],
+      "properties": {
+        "providerAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "observedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "receivedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "eventSequence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stream",
+        "generation"
+      ],
+      "properties": {
+        "stream": {
+          "$ref": "#/$defs/namespacedId"
+        },
+        "generation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "providerSequence": {
+          "type": "string"
+        }
+      }
+    },
+    "availabilityStatus": {
+      "enum": [
+        "observed",
+        "provider_reported",
+        "inferred",
+        "not_collected",
+        "unavailable",
+        "unknown",
+        "conflict"
+      ]
+    },
+    "fieldAvailability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "status"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "status": {
+          "$ref": "#/$defs/availabilityStatus"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/namespacedId"
+          }
+        }
+      }
+    },
+    "relation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "from",
+        "to",
+        "certainty"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "from": {
+          "$ref": "#/$defs/entityRef"
+        },
+        "to": {
+          "$ref": "#/$defs/entityRef"
+        },
+        "certainty": {
+          "enum": [
+            "observed",
+            "provider_reported",
+            "inferred",
+            "disputed"
+          ]
+        },
+        "includes": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "revision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "number"
+      ],
+      "properties": {
+        "number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "supersedes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/namespacedId"
+          }
+        },
+        "corrects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/namespacedId"
+          }
+        }
+      }
+    },
+    "adoption": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "candidate",
+            "adopted",
+            "rejected",
+            "superseded"
+          ]
+        },
+        "decisionId": {
+          "$ref": "#/$defs/namespacedId"
+        },
+        "ruleVersion": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "contentRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "variant",
+        "availability"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/namespacedId"
+        },
+        "variant": {
+          "enum": [
+            "raw",
+            "redacted",
+            "summary",
+            "hash_only",
+            "omitted",
+            "deleted"
+          ]
+        },
+        "mediaType": {
+          "type": "string"
+        },
+        "byteLength": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string"
+        },
+        "availability": {
+          "$ref": "#/$defs/availabilityStatus"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "derivedFrom": {
+          "$ref": "#/$defs/namespacedId"
+        }
+      }
+    },
+    "quantity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "availability"
+      ],
+      "properties": {
+        "value": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "availability": {
+          "$ref": "#/$defs/availabilityStatus"
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "usageBucket": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "tokens"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tokens": {
+          "$ref": "#/$defs/quantity"
+        }
+      }
+    },
+    "usageSubset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "of",
+        "tokens"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "of": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tokens": {
+          "$ref": "#/$defs/quantity"
+        }
+      }
+    },
+    "instructionPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instruction",
+        "actor",
+        "content",
+        "state"
+      ],
+      "properties": {
+        "instruction": {
+          "$ref": "#/$defs/entityRef"
+        },
+        "actor": {
+          "$ref": "#/$defs/entityRef"
+        },
+        "content": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/contentRef"
+          }
+        },
+        "state": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "actorPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "actor",
+        "kind"
+      ],
+      "properties": {
+        "actor": {
+          "$ref": "#/$defs/entityRef"
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "parent": {
+          "$ref": "#/$defs/entityRef"
+        }
+      }
+    },
+    "modelCallPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "call",
+        "instruction",
+        "actor",
+        "state"
+      ],
+      "properties": {
+        "call": {
+          "$ref": "#/$defs/entityRef"
+        },
+        "instruction": {
+          "$ref": "#/$defs/entityRef"
+        },
+        "actor": {
+          "$ref": "#/$defs/entityRef"
+        },
+        "requestedModel": {
+          "type": "string"
+        },
+        "actualModel": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string",
+          "minLength": 1
+        },
+        "response": {
+          "$ref": "#/$defs/entityRef"
+        }
+      }
+    },
+    "modelAttemptPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt",
+        "call",
+        "number",
+        "state"
+      ],
+      "properties": {
+        "attempt": {
+          "$ref": "#/$defs/entityRef"
+        },
+        "call": {
+          "$ref": "#/$defs/entityRef"
+        },
+        "number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "state": {
+          "type": "string",
+          "minLength": 1
+        },
+        "response": {
+          "$ref": "#/$defs/entityRef"
+        },
+        "error": {
+          "$ref": "#/$defs/contentRef"
+        }
+      }
+    },
+    "usagePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "usage",
+        "appliesTo",
+        "raw",
+        "counter",
+        "state"
+      ],
+      "properties": {
+        "usage": {
+          "$ref": "#/$defs/entityRef"
+        },
+        "appliesTo": {
+          "$ref": "#/$defs/entityRef"
+        },
+        "raw": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "unit",
+            "fields"
+          ],
+          "properties": {
+            "unit": {
+              "type": "string",
+              "minLength": 1
+            },
+            "fields": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": true
+            }
+          }
+        },
+        "normalized": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "exclusiveBuckets"
+          ],
+          "properties": {
+            "exclusiveBuckets": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/usageBucket"
+              }
+            },
+            "subsets": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/usageSubset"
+              }
+            },
+            "totals": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/usageBucket"
+              }
+            }
+          }
+        },
+        "counter": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "delta",
+                "cumulative",
+                "snapshot"
+              ]
+            },
+            "generation": {
+              "type": "string"
+            },
+            "baselineEventId": {
+              "$ref": "#/$defs/namespacedId"
+            }
+          }
+        },
+        "state": {
+          "enum": [
+            "provisional",
+            "final",
+            "corrected"
+          ]
+        }
+      }
+    },
+    "inputPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "element",
+        "call",
+        "kind"
+      ],
+      "properties": {
+        "element": {
+          "$ref": "#/$defs/entityRef"
+        },
+        "call": {
+          "$ref": "#/$defs/entityRef"
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "content": {
+          "$ref": "#/$defs/contentRef"
+        },
+        "tokens": {
+          "$ref": "#/$defs/quantity"
+        },
+        "transformation": {
+          "type": "string"
+        }
+      }
+    },
+    "operationPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operation",
+        "actor",
+        "kind",
+        "name"
+      ],
+      "properties": {
+        "operation": {
+          "$ref": "#/$defs/entityRef"
+        },
+        "actor": {
+          "$ref": "#/$defs/entityRef"
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "input": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/contentRef"
+          }
+        },
+        "requestedTarget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "protocol": {
+              "type": "string"
+            }
+          }
+        },
+        "risk": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "level",
+            "ruleVersion"
+          ],
+          "properties": {
+            "level": {
+              "type": "string"
+            },
+            "ruleVersion": {
+              "type": "string"
+            },
+            "reasons": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "approvalPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "approval",
+        "decision"
+      ],
+      "properties": {
+        "approval": {
+          "$ref": "#/$defs/entityRef"
+        },
+        "operation": {
+          "$ref": "#/$defs/entityRef"
+        },
+        "decision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "decidedBy": {
+          "$ref": "#/$defs/entityRef"
+        },
+        "reason": {
+          "$ref": "#/$defs/contentRef"
+        }
+      }
+    },
+    "operationResultPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operation",
+        "status"
+      ],
+      "properties": {
+        "operation": {
+          "$ref": "#/$defs/entityRef"
+        },
+        "status": {
+          "type": "string",
+          "minLength": 1
+        },
+        "exitCode": {
+          "type": "integer"
+        },
+        "output": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/contentRef"
+          }
+        },
+        "durationMillis": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "async": {
+          "type": "boolean"
+        }
+      }
+    },
+    "statePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subject",
+        "to"
+      ],
+      "properties": {
+        "subject": {
+          "$ref": "#/$defs/entityRef"
+        },
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "$ref": "#/$defs/contentRef"
+        }
+      }
+    },
+    "artifactPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact",
+        "kind",
+        "change"
+      ],
+      "properties": {
+        "artifact": {
+          "$ref": "#/$defs/entityRef"
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "locator": {
+          "$ref": "#/$defs/contentRef"
+        },
+        "content": {
+          "$ref": "#/$defs/contentRef"
+        },
+        "change": {
+          "type": "string",
+          "minLength": 1
+        },
+        "byteLength": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string"
+        }
+      }
+    },
+    "pricingPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "price",
+        "provider",
+        "modelPattern",
+        "currency",
+        "effectiveFrom",
+        "rates"
+      ],
+      "properties": {
+        "price": {
+          "$ref": "#/$defs/entityRef"
+        },
+        "provider": {
+          "type": "string",
+          "minLength": 1
+        },
+        "modelPattern": {
+          "type": "string",
+          "minLength": 1
+        },
+        "currency": {
+          "type": "string",
+          "minLength": 1
+        },
+        "effectiveFrom": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "effectiveTo": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "rates": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "usageClass",
+              "unit",
+              "amount"
+            ],
+            "properties": {
+              "usageClass": {
+                "type": "string"
+              },
+              "unit": {
+                "type": "string"
+              },
+              "amount": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "conditions": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "source": {
+          "$ref": "#/$defs/contentRef"
+        }
+      }
+    },
+    "spendPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "spend",
+        "kind",
+        "amount",
+        "currency"
+      ],
+      "properties": {
+        "spend": {
+          "$ref": "#/$defs/entityRef"
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "amount": {
+          "type": "string",
+          "minLength": 1
+        },
+        "currency": {
+          "type": "string",
+          "minLength": 1
+        },
+        "usage": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/entityRef"
+          }
+        },
+        "coverage": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/entityRef"
+          }
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "collectionStatePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stream",
+        "state",
+        "generation"
+      ],
+      "properties": {
+        "stream": {
+          "$ref": "#/$defs/entityRef"
+        },
+        "state": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cursor": {
+          "type": "string"
+        },
+        "generation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "lastGoodPosition": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error": {
+          "$ref": "#/$defs/contentRef"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/contentRef"
+          }
+        },
+        "coverage": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/fieldAvailability"
+          }
+        }
+      }
+    }
+  }
+}

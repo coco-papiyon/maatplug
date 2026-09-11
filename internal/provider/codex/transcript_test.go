@@ -122,3 +122,33 @@ func TestTurnTokensReturnsNilWithoutTranscript(t *testing.T) {
 		t.Fatalf("usage = %+v, want nil", usage)
 	}
 }
+
+func TestNormalizeUsageRejectsOverlappingBucketsLargerThanInput(t *testing.T) {
+	got := normalizeUsage(&codexUsage{Input: 100, CachedInput: 80, CacheWrite: 30, Output: 10, Total: 110})
+	if got != nil {
+		t.Fatalf("normalizeUsage() = %+v, want nil for impossible input buckets", got)
+	}
+}
+
+func TestNormalizeUsageRejectsInconsistentProviderTotal(t *testing.T) {
+	got := normalizeUsage(&codexUsage{Input: 100, CachedInput: 20, Output: 10, Total: 999})
+	if got != nil {
+		t.Fatalf("normalizeUsage() = %+v, want nil for inconsistent provider total", got)
+	}
+}
+
+func TestNormalizeUsageIncludesReasoningInsideOutput(t *testing.T) {
+	got := normalizeUsage(&codexUsage{
+		Input:           283_583,
+		CachedInput:     260_608,
+		Output:          8_858,
+		ReasoningOutput: 160,
+		Total:           292_441,
+	})
+	if got == nil {
+		t.Fatal("normalizeUsage() = nil, want valid usage")
+	}
+	if got.Input != 22_975 || got.CacheRead != 260_608 || got.Output != 8_858 || got.Total != 292_441 {
+		t.Fatalf("normalizeUsage() = %+v, want exact observed Codex buckets", got)
+	}
+}

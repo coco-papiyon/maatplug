@@ -44,6 +44,8 @@ function route() {
   if (parts[0] === "project" && parts.length === 4 && parts[3] === "trend") {
     return { view: "trend", areaId: decodeURIComponent(parts[1]), projectId: decodeURIComponent(parts[2]) };
   }
+  if (parts[0] === "data" && parts.length === 1) return { view: "dataAreas" };
+  if (parts[0] === "collection" && parts.length === 1) return { view: "collection" };
   if (parts[0] === "settings" && parts.length === 1) return { view: "settings" };
   return { view: "notfound" };
 }
@@ -64,11 +66,47 @@ async function render() {
     if (r.view === "project") return renderProject(r.areaId, r.projectId);
     if (r.view === "session") return renderSession(r.areaId, r.projectId, r.provider, r.sessionId);
     if (r.view === "trend") return renderTrendDetail(r.areaId, r.projectId);
+    if (r.view === "dataAreas") return renderDataAreas();
+    if (r.view === "collection") return renderCollectionStatus();
     if (r.view === "settings") return renderSettings();
     app.innerHTML = `<p class="error">ページが見つかりません</p>`;
   } catch (err) {
     app.innerHTML = `<p class="error">読み込みに失敗しました: ${escapeHTML(err.message)}</p>`;
   }
+}
+
+async function renderCollectionStatus() {
+  app.innerHTML = `<p class="loading">読み込み中…</p>`;
+  const areas = await fetchJSON("/api/collection-status");
+  const cards = areas.map(({ dataAreaName, report }) => {
+    const c = report.collection;
+    const worker = report.worker;
+    const pricing = report.pricing;
+    const performance = report.performance;
+    const full = report.fullScanAvailable;
+    const missing = Object.entries(report.coverage.missingPaths || {}).sort((a, b) => b[1] - a[1]);
+    return `
+      <section class="settings-section">
+        <h3>${escapeHTML(dataAreaName)}</h3>
+        <dl class="collection-grid">
+          <div><dt>ワーカー</dt><dd>${worker.known ? escapeHTML(worker.state.status || "unknown") : "未実行"}${worker.stale ? ` <span class="chip warn">停止・期限超過</span>` : ""}</dd></div>
+          <div><dt>Inbox</dt><dd>待機 ${c.inbox.pending} / 処理中 ${c.inbox.processing} / 失敗 ${c.inbox.failed}</dd></div>
+          <div><dt>解析</dt><dd>${full ? `イベント ${c.events} / エラー ${report.coverage.parseErrors + (c.journalErrors || []).length}` : "未計測"}</dd></div>
+          <div><dt>料金</dt><dd>${pricing.activeVersion ? escapeHTML(pricing.activeVersion) : "未設定"}${pricing.staleSources.length ? ` / 鮮度切れ ${pricing.staleSources.length}` : ""}</dd></div>
+          <div><dt>保存量</dt><dd>${full ? `${performance.fileCount} files / ${formatBytes(performance.totalBytes)}` : "未計測"}</dd></div>
+          <div><dt>問い合わせ</dt><dd>${full ? `一覧 ${performance.listMillis} ms / 詳細 ${performance.detailMillis} ms / 期間 ${performance.periodMillis} ms` : "maatplug doctorで計測"}</dd></div>
+        </dl>
+        ${worker.reason ? `<p class="settings-help">${escapeHTML(worker.reason)}</p>` : ""}
+        ${missing.length ? `<details><summary>欠測 (${missing.length}項目)</summary><ul>${missing.map(([path,count])=>`<li><code>${escapeHTML(path)}</code>: ${count}</li>`).join("")}</ul></details>` : ""}
+      </section>`;
+  }).join("");
+  app.innerHTML = `<p class="breadcrumb"><a href="#/">← Projects</a></p><h2>収集状態</h2>${cards || `<p class="empty">データ領域がありません。</p>`}`;
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
 }
 
 async function renderProjects() {
@@ -170,8 +208,8 @@ function renderProjectsResults(list, state) {
       <td class="num">${p.instructions}</td>
       <td class="num">${tokenBreakdown(p)}</td>
       <td class="num">${costCell(p)}</td>
-      <td class="num"><span class="added">+${p.linesAdded}</span> / <span class="removed">-${p.linesRemoved}</span></td>
-      <td class="num">${p.abandonedInstructions > 0 ? `<span class="chip warn">${p.abandonedInstructions} unmeasured</span>` : ""}</td>
+      <td class="num">${changeCell(p.changes)}</td>
+      <td class="num">${abandonedCell(p)}</td>
     </tr>
   `).join("");
 
@@ -184,7 +222,7 @@ function renderProjectsResults(list, state) {
           ${sortableHeader("Sessions", "sessions", state, true)}
           ${sortableHeader("Instructions", "instructions", state, true)}
           ${sortableHeader("Tokens (IN / Cache / OUT)", "totalTokens", state, true)}
-          ${sortableHeader("Cost", "costUsd", state, true)}
+          ${sortableHeader("Est. cost", "costUsd", state, true)}
           <th class="num">Lines</th>
           <th class="num"></th>
         </tr>
@@ -277,8 +315,8 @@ function renderSessionsResults(areaId, projectId, list, state) {
         <td class="num">${s.instructions}</td>
         <td class="num">${tokenBreakdown(s)}</td>
         <td class="num">${costCell(s)}</td>
-        <td class="num"><span class="added">+${s.linesAdded}</span> / <span class="removed">-${s.linesRemoved}</span></td>
-        <td class="num">${s.abandonedInstructions > 0 ? `<span class="chip warn">${s.abandonedInstructions} unmeasured</span>` : ""}</td>
+        <td class="num">${changeCell(s.changes)}</td>
+        <td class="num">${abandonedCell(s)}</td>
       </tr>
     `;
   }).join("");
@@ -294,7 +332,7 @@ function renderSessionsResults(areaId, projectId, list, state) {
           ${sortableHeader("Started", "startedAt", state)}
           ${sortableHeader("Instructions", "instructions", state, true)}
           ${sortableHeader("Tokens (IN / Cache / OUT)", "totalTokens", state, true)}
-          ${sortableHeader("Cost", "costUsd", state, true)}
+          ${sortableHeader("Est. cost", "costUsd", state, true)}
           <th class="num">Lines</th>
           <th class="num"></th>
         </tr>
@@ -313,54 +351,35 @@ async function renderSession(areaId, projectId, provider, sessionId) {
 
   const breadcrumb = `<p class="breadcrumb"><a href="#/">Projects</a> / <a href="#/project/${encodeURIComponent(areaId || "default")}/${encodeURIComponent(projectId)}">← Sessions</a></p>`;
 
-  const clocRow = (label, cloc) => cloc
-    ? `<div class="stat"><span class="label">${label}</span><span class="value">${cloc.code.toLocaleString()} code lines</span></div>`
-    : `<div class="stat"><span class="label">${label}</span><span class="value">—</span></div>`;
-
-  const turns = detail.turns.map((t) => {
-    const badges = [];
-    if (t.model) badges.push(`<span class="chip model">${escapeHTML(t.model)}</span>`);
-    if (t.abandoned) badges.push(`<span class="chip warn">unmeasured (abandoned)</span>`);
-    else if (t.mergedInto) badges.push(`<a class="chip merged" href="#turn-${escapeHTML(t.mergedInto)}">queued alongside another instruction — see below</a>`);
-    else if (!t.resolved) badges.push(`<span class="chip">in progress</span>`);
-    else if (t.tokensUnavailable) badges.push(`<span class="chip">tokens unavailable</span>`);
-
-    const tokens = t.tokens ? `${t.tokens.total.toLocaleString()} tokens ${turnTokenBreakdown(t.tokens)}` : null;
-    const diff = t.resolved && !t.abandoned && !t.mergedInto
-      ? `<span class="added">+${t.diff.added}</span> / <span class="removed">-${t.diff.removed}</span> (${t.diff.filesChanged} files)`
-      : null;
-    const cost = t.tokens && !t.abandoned && !t.mergedInto
-      ? (t.costUnavailable ? `<span class="chip">cost unavailable</span>` : formatUSD(t.costUsd))
-      : null;
-    const rawInstructionText = t.text || "(no text recorded)";
-    const instructionText = rawInstructionText.trimEnd() || rawInstructionText;
-    const hasLineBreak = /[\r\n]/.test(instructionText);
-
+  const knownTokens = detail.usage && detail.usage.knownSubtotal || 0;
+  const costTotals = detail.estimatedCost && detail.estimatedCost.knownTotals || [];
+  const usd = currencyAmount({ estimatedCost: costTotals }, "USD");
+  const costIncomplete = detail.estimatedCost && detail.estimatedCost.missingCost;
+  const operations = detail.operations && detail.operations.operations || [];
+  const missing = detail.missing || [];
+  const events = (detail.events || []).map((event) => {
+    const id = event.eventId && `${event.eventId.namespace}:${event.eventId.value}`;
     return `
-      <div class="turn" id="turn-${escapeHTML(t.instructionId)}">
+      <div class="turn">
         <div class="turn-head">
-          <span>${badges.join(" ")}</span>
-          <span class="ts">${formatTimestamp(t.ts)}</span>
+          <span><span class="chip">${escapeHTML(event.eventType || "event")}</span></span>
+          <span class="ts">${formatTimestamp(event.time && event.time.receivedAt)}</span>
         </div>
-        <details class="instruction-details" data-has-line-break="${hasLineBreak}">
-          <summary><span class="instruction-preview">${escapeHTML(instructionText)}</span></summary>
-          <p class="text">${escapeHTML(instructionText)}</p>
-        </details>
-        <div class="metrics">${[diff, tokens, cost].filter(Boolean).join(" &nbsp;·&nbsp; ") || "&nbsp;"}</div>
-      </div>
-    `;
+        <code>${escapeHTML(id || "unknown event")}</code>
+        <details class="instruction-details"><summary>観測内容</summary><pre class="text">${escapeHTML(JSON.stringify(event.payload || {}, null, 2))}</pre></details>
+      </div>`;
   }).join("");
 
   app.innerHTML = `
     ${breadcrumb}
-    <p class="session-meta"><span class="chip">${escapeHTML(detail.provider)}</span> <code>${escapeHTML(detail.sessionId)}</code><br>${escapeHTML(detail.cwd || "")}</p>
-    <div class="cloc-summary">
-      ${clocRow("cloc at start", detail.clocStart)}
-      ${clocRow("cloc at end", detail.clocEnd)}
+    <p class="session-meta"><span class="chip">${escapeHTML(detail.provider)}</span> <code>${escapeHTML(detail.sessionId)}</code></p>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Known tokens</div><div class="stat-value">${knownTokens.toLocaleString()}</div>${detail.usage && detail.usage.unknown ? '<span class="chip warn">+ unknown</span>' : ''}</div>
+      <div class="stat"><div class="stat-label">Estimated cost</div><div class="stat-value">${usd === null ? "—" : formatUSD(Number(usd))}</div>${costIncomplete ? '<span class="chip warn">+ uncomputed</span>' : ''}</div>
+      <div class="stat"><div class="stat-label">Operations</div><div class="stat-value">${operations.length.toLocaleString()}</div><div class="stat-caption">${missing.length} unavailable field(s)</div></div>
     </div>
-    ${turns || '<p class="empty">このセッションにはまだ指示が記録されていません。</p>'}
+    ${events || '<p class="empty">このセッションにはまだイベントが記録されていません。</p>'}
   `;
-  initializeExpandableInstructions();
 }
 
 // --- graph detail page (stacked breakdown chart) ---
@@ -377,8 +396,20 @@ async function renderSession(areaId, projectId, provider, sessionId) {
 async function renderTrendDetail(areaId, projectId) {
   app.innerHTML = `<p class="loading">読み込み中…</p>`;
 
-  const state = { provider: "", days: "", dimension: "provider", breakdown: null };
-  state.breakdown = await fetchBreakdown(projectId, areaId, state.provider, state.days, state.dimension);
+  // state.projectId/areaId start from the route (how this page was
+  // reached — the global chart, or one project's "sync/tokens" card) but
+  // are then just another filter: the Project select below can point them
+  // at any project without a navigation, the same way the provider segment
+  // or date range already work. allProjects is fetched unfiltered (by
+  // provider/date) once, purely to populate that dropdown — the dropdown's
+  // available projects don't shrink just because the current provider
+  // filter would show zero data for one of them.
+  const state = { provider: "", days: "7", dimension: "provider", projectId: projectId || "", areaId: areaId || "", breakdown: null };
+  const [allProjects, breakdown] = await Promise.all([
+    fetchProjects("", ""),
+    fetchBreakdown(state.projectId, state.areaId, state.provider, state.days, state.dimension),
+  ]);
+  state.breakdown = breakdown;
 
   const breadcrumb = projectId
     ? `<p class="breadcrumb"><a href="#/">Projects</a> / <a href="#/project/${encodeURIComponent(areaId || "default")}/${encodeURIComponent(projectId)}">← Sessions</a></p>`
@@ -388,13 +419,14 @@ async function renderTrendDetail(areaId, projectId) {
     ${breadcrumb}
     <div class="toolbar">
       <div class="toolbar-filters">
+        ${projectSelectHTML("trend-project", allProjects, state.projectId)}
         ${providerSegmentHTML("trend-provider")}
-        ${dateRangeHTML("trend-range")}
+        ${dateRangeHTML("trend-range", state.days)}
       </div>
       ${dimensionSegmentHTML("trend-dimension")}
     </div>
     <section class="chart-section">
-      <h3 class="chart-title">Cost</h3>
+      <h3 class="chart-title">Estimated cost (USD)</h3>
       <div id="chart-area-cost"></div>
     </section>
     <section class="chart-section">
@@ -410,12 +442,13 @@ async function renderTrendDetail(areaId, projectId) {
   // instead of letting them be compared at a glance.
   const chartAreaCost = document.getElementById("chart-area-cost");
   const chartAreaTokens = document.getElementById("chart-area-tokens");
+  wireProjectSelect(document.getElementById("trend-project"), state, reload);
   wireProviderSegment(document.getElementById("trend-provider"), state, reload);
   wireDateRange(document.getElementById("trend-range"), state, reload);
   wireDimensionSegment(document.getElementById("trend-dimension"), state, reload);
 
   async function reload() {
-    state.breakdown = await fetchBreakdown(projectId, areaId, state.provider, state.days, state.dimension);
+    state.breakdown = await fetchBreakdown(state.projectId, state.areaId, state.provider, state.days, state.dimension);
     paint();
   }
 
@@ -430,6 +463,40 @@ async function renderTrendDetail(areaId, projectId) {
   }
 
   paint();
+}
+
+// projectSelectHTML renders the graph detail page's Project filter — every
+// project across every data area (unfiltered by provider/date-range; see
+// renderTrendDetail), plus a leading "all projects" option. Each area's
+// name rides along in the option label the same way the project list table
+// shows an area chip next to every row, since project ids are only unique
+// within their own area.
+function projectSelectHTML(id, projects, selectedProjectId) {
+  const options = (projects || []).map((p) => {
+    const label = `${p.name || p.projectId} (${p.dataAreaName || "Default"})`;
+    const selected = p.projectId === selectedProjectId ? " selected" : "";
+    return `<option value="${escapeHTML(p.projectId)}" data-area-id="${escapeHTML(p.dataAreaId || "")}"${selected}>${escapeHTML(label)}</option>`;
+  }).join("");
+  return `
+    <select id="${id}" class="date-range">
+      <option value=""${selectedProjectId ? "" : " selected"}>全プロジェクト</option>
+      ${options}
+    </select>
+  `;
+}
+
+// wireProjectSelect updates state.projectId/areaId together (an option's
+// data-area-id rides alongside its value — see projectSelectHTML) and
+// triggers a refetch, the same way provider/date-range already do: which
+// project the charts are scoped to is a server-side aggregation choice,
+// not something a client-side re-filter of already-fetched data could do.
+function wireProjectSelect(select, state, onReload) {
+  select.addEventListener("change", () => {
+    const option = select.selectedOptions[0];
+    state.projectId = select.value;
+    state.areaId = option ? option.dataset.areaId || "" : "";
+    onReload();
+  });
 }
 
 // fetchBreakdown loads the graph detail page's stacked series — either
@@ -587,12 +654,13 @@ function wireStackedChartTooltips(container, dates, series, metric) {
     const title = formatDateLabel(dates[di]);
     const rows = series.map((s, si) => ({
       label: categoryLabel(s.key),
-      value: formatMetricValue(s.points[di][metric], metric),
+      value: formatMetricValue(metricValue(s.points[di], metric), metric) + missingSuffix(s.points[di], metric),
       color: categoryColor(s.key, si, dark),
     }));
     if (series.length > 1) {
-      const total = series.reduce((sum, s) => sum + (s.points[di][metric] || 0), 0);
-      rows.push({ label: "Total", value: formatMetricValue(total, metric), total: true });
+      const total = series.reduce((sum, s) => sum + metricValue(s.points[di], metric), 0);
+      const incomplete = series.some((s) => metricMissing(s.points[di], metric));
+      rows.push({ label: "Total", value: formatMetricValue(total, metric) + (incomplete ? " + unknown" : ""), total: true });
     }
 
     hit.addEventListener("pointerenter", (e) => showChartTooltip(e.clientX, e.clientY, title, rows));
@@ -643,7 +711,7 @@ function categoryColor(key, index, dark) {
 // breakdown's raw (unfiltered) versions.
 function buildStackedChart(breakdown, metric, dimension) {
   const dates = breakdown && breakdown.dates || [];
-  const series = (breakdown && breakdown.series || []).filter((s) => s.points.some((p) => (p[metric] || 0) > 0));
+  const series = (breakdown && breakdown.series || []).filter((s) => s.points.some((p) => metricValue(p, metric) > 0 || metricMissing(p, metric)));
   if (dates.length === 0 || series.length === 0) {
     return { html: `<p class="empty">この条件に一致するデータがありません。</p>`, dates: [], series: [] };
   }
@@ -654,7 +722,7 @@ function buildStackedChart(breakdown, metric, dimension) {
   const W = 1120, H = 320;
   const padRight = 12, padTop = 16, padBottom = 36;
 
-  const totals = dates.map((_, di) => series.reduce((sum, s) => sum + (s.points[di][metric] || 0), 0));
+  const totals = dates.map((_, di) => series.reduce((sum, s) => sum + metricValue(s.points[di], metric), 0));
   const maxTotal = niceMax(Math.max(...totals, 0));
 
   // Y-axis tick values, computed before padLeft: the left gutter must fit
@@ -680,7 +748,7 @@ function buildStackedChart(breakdown, metric, dimension) {
     const x = padLeft + di * slot + (slot - barW) / 2;
     let cursor = totals[di];
     const segs = series.map((s, si) => {
-      const v = s.points[di][metric] || 0;
+      const v = metricValue(s.points[di], metric);
       const yTop = yFor(cursor);
       const yBottom = yFor(cursor - v);
       cursor -= v;
@@ -735,7 +803,9 @@ function buildStackedChart(breakdown, metric, dimension) {
     </span>
   `).join("");
 
+  const hasMissing = series.some((s) => s.points.some((p) => metricMissing(p, metric)));
   const html = `
+    ${hasMissing ? '<p><span class="chip warn">既知の小計です。未計測または未計算の値があります。</span></p>' : ''}
     <div class="chart-svg-wrap">
       <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${escapeHTML(dimension)} breakdown">
         ${yAxis}
@@ -786,30 +856,43 @@ function formatDateLabel(dateStr, short) {
     : d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
-async function renderSettings() {
+// renderDataAreas is the "データ" nav item (#/data): where maatplug reads
+// project data FROM — local/mounted directories and SSH-synced remote
+// directories. Non-data app behavior (e.g. how often SSH areas re-sync)
+// lives on the separate "設定" screen instead — see renderSettings.
+async function renderDataAreas() {
   app.innerHTML = `<p class="loading">読み込み中…</p>`;
   const settings = await fetchJSON("/api/settings");
-  const rows = (settings.dataAreas || []).map((area) => `
-    <li class="data-area-row">
-      <div>
-        <strong>${escapeHTML(area.name)}</strong>
-        <code>${escapeHTML(area.path)}</code>
-      </div>
-      ${area.default ? `<span class="chip">デフォルト</span>` : `<button class="danger remove-area" data-area-id="${escapeHTML(area.id)}">削除</button>`}
-    </li>
-  `).join("");
+  const syncStatusById = {};
+  for (const status of settings.syncStatus || []) syncStatusById[status.areaId] = status;
+
+  const rows = (settings.dataAreas || []).map((area) => areaRowHTML(area, syncStatusById[area.id])).join("");
 
   app.innerHTML = `
     <p class="breadcrumb"><button type="button" id="settings-back" class="back-link">← Projects</button></p>
-    <h2>設定</h2>
-    <p class="settings-help">複数のユーザーやサーバーのmaatplugデータ領域を追加すると、同じダッシュボードで使用状況を確認できます。共有フォルダやマウント済みのネットワークパスも指定できます。</p>
+    <h2>データ領域</h2>
+    <p class="settings-help">複数のユーザーやサーバーのmaatplugデータ領域を追加すると、同じダッシュボードで使用状況を確認できます。共有フォルダやマウント済みのネットワークパスに加え、SSH経由でリモートのmaatplugデータを定期的に同期することもできます（同期間隔は<a href="#/settings">設定</a>で変更できます）。</p>
     <section class="settings-section">
-      <h3>データ領域</h3>
       <ul class="data-area-list">${rows}</ul>
       <form id="add-area-form" class="add-area-form">
+        <div class="segmented" id="area-kind">
+          <button type="button" class="active" data-kind="local">ローカル</button>
+          <button type="button" data-kind="ssh">SSH(リモート)</button>
+        </div>
+        <input type="hidden" name="kind" value="local">
         <label>表示名<input name="name" type="text" placeholder="例: 開発サーバー"></label>
-        <label>データパス<input name="path" type="text" placeholder="例: C:\\Users\\user\\AppData\\Roaming\\maatplug" required></label>
-        <button type="submit">データ領域を追加</button>
+        <div id="local-area-fields" class="area-kind-fields">
+          <label>データパス<input name="path" type="text" placeholder="例: C:\\Users\\user\\AppData\\Roaming\\maatplug" required></label>
+        </div>
+        <div id="ssh-area-fields" class="area-kind-fields" hidden>
+          <label>
+            SSHホスト
+            <span class="field-hint">~/.ssh/config に登録済みのHostエイリアス。ユーザー名・秘密鍵は設定済みである前提で、ここでは指定しません</span>
+            <input name="sshHost" type="text" placeholder="例: build-server">
+          </label>
+          <label>リモートのmaatplugデータディレクトリ<input name="remotePath" type="text" placeholder="例: /home/user/.config/maatplug"></label>
+        </div>
+        <button type="submit" id="add-area-submit">データ領域を追加</button>
       </form>
       <p id="settings-message" class="settings-message" hidden></p>
     </section>
@@ -818,21 +901,33 @@ async function renderSettings() {
   document.getElementById("settings-back").addEventListener("click", () => {
     window.location.hash = "";
   });
+
   const message = document.getElementById("settings-message");
+  const showMessage = (text) => {
+    message.textContent = text;
+    message.hidden = false;
+  };
+
+  wireAreaKindToggle();
+
   document.getElementById("add-area-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
     const body = Object.fromEntries(new FormData(form));
+    const submitBtn = document.getElementById("add-area-submit");
+    submitBtn.disabled = true;
+    submitBtn.textContent = body.kind === "ssh" ? "接続確認・同期中…" : "追加中…";
     try {
       await fetchJSON("/api/settings/areas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      await renderSettings();
+      await renderDataAreas();
     } catch (err) {
-      message.textContent = err.message;
-      message.hidden = false;
+      showMessage(err.message);
+      submitBtn.disabled = false;
+      submitBtn.textContent = "データ領域を追加";
     }
   });
 
@@ -841,12 +936,156 @@ async function renderSettings() {
       if (!confirm("このデータ領域を一覧から削除しますか？保存されているデータ自体は削除されません。")) return;
       try {
         await fetchJSON(`/api/settings/areas/${encodeURIComponent(button.dataset.areaId)}`, { method: "DELETE" });
-        await renderSettings();
+        await renderDataAreas();
       } catch (err) {
-        message.textContent = err.message;
-        message.hidden = false;
+        showMessage(err.message);
       }
     });
+  });
+
+  document.querySelectorAll(".sync-area").forEach((button) => {
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      button.textContent = "同期中…";
+      try {
+        await fetchJSON(`/api/settings/areas/${encodeURIComponent(button.dataset.areaId)}/sync`, { method: "POST" });
+        await renderDataAreas();
+      } catch (err) {
+        showMessage(err.message);
+        button.disabled = false;
+        button.textContent = "今すぐ同期";
+      }
+    });
+  });
+}
+
+// renderSettings is the "設定" nav item (#/settings): maatplug-web's own
+// behavior settings, as opposed to renderDataAreas' "where data comes
+// from". Today that's just the SSH remote-sync interval; GET/PUT
+// /api/settings/app is where this grows if more app-level settings show up
+// later.
+async function renderSettings() {
+  app.innerHTML = `<p class="loading">読み込み中…</p>`;
+  const settings = await fetchJSON("/api/settings/app");
+
+  app.innerHTML = `
+    <p class="breadcrumb"><button type="button" id="settings-back" class="back-link">← Projects</button></p>
+    <h2>設定</h2>
+    <section class="settings-section">
+      <form id="app-settings-form" class="add-area-form">
+        <label>
+          リモート同期の間隔（分）
+          <span class="field-hint">SSHデータ領域（<a href="#/data">データ</a>で追加）をバックグラウンドで再同期する頻度です。</span>
+          <input name="remoteSyncIntervalMinutes" type="number" min="1" step="1" value="${settings.remoteSyncIntervalMinutes}" required>
+        </label>
+        <button type="submit" id="app-settings-submit">保存</button>
+      </form>
+      <p id="settings-message" class="settings-message" hidden></p>
+    </section>
+  `;
+
+  document.getElementById("settings-back").addEventListener("click", () => {
+    window.location.hash = "";
+  });
+
+  const message = document.getElementById("settings-message");
+  document.getElementById("app-settings-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const body = { remoteSyncIntervalMinutes: Number(new FormData(form).get("remoteSyncIntervalMinutes")) };
+    const submitBtn = document.getElementById("app-settings-submit");
+    submitBtn.disabled = true;
+    submitBtn.textContent = "保存中…";
+    try {
+      await fetchJSON("/api/settings/app", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      submitBtn.textContent = "保存しました";
+      setTimeout(() => {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "保存";
+      }, 1500);
+    } catch (err) {
+      message.textContent = err.message;
+      message.hidden = false;
+      submitBtn.disabled = false;
+      submitBtn.textContent = "保存";
+    }
+  });
+}
+
+// areaRowHTML renders one data-areas-list <li>, branching on area.kind
+// (store.DataAreaKindSSH vs local/default) — an SSH area additionally
+// shows its sync status (see syncStatusById in renderDataAreas, sourced
+// from GET /api/settings's syncStatus, keyed by area id) and a manual
+// "sync now" action.
+function areaRowHTML(area, status) {
+  const isSSH = area.kind === "ssh";
+  const location = isSSH
+    ? `<code>${escapeHTML(area.sshHost)}:${escapeHTML(area.remotePath)}</code>`
+    : `<code>${escapeHTML(area.path)}</code>`;
+
+  const actions = area.default
+    ? `<span class="chip">デフォルト</span>`
+    : `
+      <div class="data-area-actions">
+        ${isSSH ? `<button type="button" class="sync-area" data-area-id="${escapeHTML(area.id)}">今すぐ同期</button>` : ""}
+        <button type="button" class="danger remove-area" data-area-id="${escapeHTML(area.id)}">削除</button>
+      </div>
+    `;
+
+  return `
+    <li class="data-area-row">
+      <div>
+        <strong>${escapeHTML(area.name)}</strong> ${isSSH ? `<span class="chip">SSH</span>` : ""}
+        ${location}
+        ${isSSH ? `<div class="sync-status">${syncStatusHTML(status)}</div>` : ""}
+      </div>
+      ${actions}
+    </li>
+  `;
+}
+
+// syncStatusHTML renders one SSH area's last known sync outcome (see
+// remotesync.AreaStatus) — "not yet" before the first cycle has run,
+// otherwise a timestamp plus either a file count or the last error.
+function syncStatusHTML(status) {
+  if (!status) return `<span class="sync-status-pending">まだ同期されていません</span>`;
+  const when = formatTimestamp(status.lastSyncAt);
+  if (status.lastError) {
+    return `<span class="sync-status-error" title="${escapeHTML(status.lastError)}">⚠ ${when} に同期エラー</span>`;
+  }
+  return `<span class="sync-status-ok">最終同期: ${when}（${status.filesFetched}件取得）</span>`;
+}
+
+// wireAreaKindToggle switches the add-area form between its local and SSH
+// field groups — visibility (hidden) and required-ness move together, so
+// the browser's own validation only ever demands the fields actually in
+// use for the currently selected kind.
+function wireAreaKindToggle() {
+  const toggle = document.getElementById("area-kind");
+  const kindInput = document.querySelector('#add-area-form input[name="kind"]');
+  const localFields = document.getElementById("local-area-fields");
+  const sshFields = document.getElementById("ssh-area-fields");
+  const pathInput = document.querySelector('#add-area-form input[name="path"]');
+  const sshHostInput = document.querySelector('#add-area-form input[name="sshHost"]');
+  const remotePathInput = document.querySelector('#add-area-form input[name="remotePath"]');
+
+  toggle.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-kind]");
+    if (!btn || btn.classList.contains("active")) return;
+    toggle.querySelector("button.active")?.classList.remove("active");
+    btn.classList.add("active");
+    kindInput.value = btn.dataset.kind;
+
+    const isSSH = btn.dataset.kind === "ssh";
+    localFields.hidden = isSSH;
+    sshFields.hidden = !isSSH;
+    pathInput.required = !isSSH;
+    sshHostInput.required = isSSH;
+    remotePathInput.required = isSSH;
   });
 }
 
@@ -922,13 +1161,14 @@ function wireProviderSegment(container, state, onReload) {
 // dateRangeHTML renders the rolling-window select (All time / 7 / 30 / 90
 // days) with a stable id, matching searchBoxHTML/providerSegmentHTML's
 // "build once, repaint only #results" pattern.
-function dateRangeHTML(id) {
+function dateRangeHTML(id, selectedDays) {
+  const opt = (value, label) => `<option value="${value}"${(selectedDays || "") === value ? " selected" : ""}>${label}</option>`;
   return `
     <select id="${id}" class="date-range">
-      <option value="">All time</option>
-      <option value="7">Last 7 days</option>
-      <option value="30">Last 30 days</option>
-      <option value="90">Last 90 days</option>
+      ${opt("", "All time")}
+      ${opt("7", "Last 7 days")}
+      ${opt("30", "Last 30 days")}
+      ${opt("90", "Last 90 days")}
     </select>
   `;
 }
@@ -997,6 +1237,14 @@ function rowComparator(key, dir, textFor) {
     if (key === "startedAt") {
       return (new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime()) * mul;
     }
+    if (key === "costUsd") {
+      const av = currencyAmount(a, "USD");
+      const bv = currencyAmount(b, "USD");
+      if (av === null && bv === null) return 0;
+      if (av === null) return 1;
+      if (bv === null) return -1;
+      return (Number(av) - Number(bv)) * mul;
+    }
     return ((a[key] ?? 0) - (b[key] ?? 0)) * mul;
   };
 }
@@ -1006,7 +1254,8 @@ function rowComparator(key, dir, textFor) {
 // filtering) so it stays truthful to what's on screen rather than the
 // unfiltered set.
 function statsHTML(list, countRowsAs, noun, trend, trendLink) {
-  const totalCost = list.reduce((sum, row) => sum + (row.costUsd || 0), 0);
+  const totalCosts = sumCurrencyTotals(list);
+  const costMissing = list.some((row) => row.costMissing);
   const totalTokens = list.reduce((sum, row) => sum + (row.totalTokens || 0), 0);
   const totalCount = list.reduce((sum, row) => sum + countRowsAs(row), 0);
   const countNoun = noun === "project" ? "session" : "instruction";
@@ -1026,8 +1275,8 @@ function statsHTML(list, countRowsAs, noun, trend, trendLink) {
   return `
     <div class="stats">
       <${cardTag} class="stat stat-link"${cardHref}>
-        <div class="stat-label">Total cost</div>
-        <div class="stat-value">${formatUSD(totalCost)}</div>
+        <div class="stat-label" title="Reference estimate from public token rates; not an actual bill">Estimated cost</div>
+        <div class="stat-value">${formatCostTotals(totalCosts, costMissing)} ${costMissing ? '<span class="chip warn">+ uncomputed</span>' : ''}</div>
         <div class="stat-foot">
           <span class="stat-caption">${trendWindow}</span>
           ${sparklineSVG(trend, "costUsd", "cost")}
@@ -1051,7 +1300,7 @@ function statsHTML(list, countRowsAs, noun, trend, trendLink) {
 }
 
 // sparklineSVG draws a small line+area trend chart (cost or token totals
-// per day, from aggregate.Trend's DailyPoint series) with a hit-target +
+// per day, from the new-journal query series) with a hit-target +
 // native <title> tooltip per point. Colors are literal hex (not CSS custom
 // properties: SVG presentation attributes don't reliably resolve var() the
 // way inline style props do), picked once per render against the viewer's
@@ -1062,7 +1311,7 @@ function sparklineSVG(points, valueKey, kind) {
   const dark = isDarkMode();
   const color = kind === "cost" ? (dark ? "#dd8a5e" : "#b8532f") : (dark ? "#9fb3dd" : "#4f6390");
 
-  const values = points.map((p) => p[valueKey] || 0);
+  const values = points.map((p) => metricValue(p, valueKey));
   const max = Math.max(...values, 0);
   const w = 90, h = 28, pad = 3;
   const stepX = (w - pad * 2) / (points.length - 1);
@@ -1080,7 +1329,7 @@ function sparklineSVG(points, valueKey, kind) {
   // pointerenter/focus to show an immediate, styled tooltip instead).
   const dots = coords.map(([x, y], i) => {
     const p = points[i];
-    const value = formatMetricValue(p[valueKey], valueKey);
+    const value = formatMetricValue(metricValue(p, valueKey), valueKey) + missingSuffix(p, valueKey);
     return `<circle class="spark-hit" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="7" fill="transparent" tabindex="0" data-date="${escapeHTML(p.date)}" data-value="${escapeHTML(value)}" data-color="${color}"></circle>`;
   }).join("");
 
@@ -1103,7 +1352,7 @@ function tokenBreakdown(sum) {
   const title = `cache read: ${(sum.tokensCacheRead || 0).toLocaleString()} / cache creation: ${(sum.tokensCacheCreation || 0).toLocaleString()}`;
   return `
     <div class="tokens">
-      <span class="total">${sum.totalTokens.toLocaleString()}</span>
+      <span class="total">${sum.totalTokens.toLocaleString()}${sum.tokenBreakdownComplete === false ? ' <span class="chip warn">partial</span>' : ''}</span>
       <span class="breakdown" title="${escapeHTML(title)}">
         <span class="tok-in">IN ${(sum.tokensInput || 0).toLocaleString()}</span> ·
         <span class="tok-cache">Cache ${cache.toLocaleString()}</span> ·
@@ -1121,16 +1370,66 @@ function turnTokenBreakdown(tokens) {
   return `<span class="breakdown" title="${escapeHTML(title)}">(IN ${(tokens.input || 0).toLocaleString()} · Cache ${cache.toLocaleString()} · OUT ${(tokens.output || 0).toLocaleString()})</span>`;
 }
 
-// costCell renders a project/session summary's priced token cost
-// (costUsd), plus an "unpriced" badge when costUnpricedInstructions is
-// nonzero — some of that summary's turns used a model with no matching
-// entry in internal/pricing, so costUsd undercounts the real total rather
-// than being wrong by zero.
+// costCell renders every known currency subtotal and keeps incomplete
+// pricing visibly separate from a real zero amount.
 function costCell(sum) {
-  const unpriced = sum.costUnpricedInstructions > 0
-    ? `<span class="chip warn" title="${sum.costUnpricedInstructions} instruction(s) used a model not in the pricing reference data">+unpriced</span>`
+  const unpriced = sum.costMissing || sum.costUnpricedInstructions > 0
+    ? `<span class="chip warn" title="${sum.costUnpricedInstructions || 0} usage record(s) could not be fully priced">+uncomputed</span>`
     : "";
-  return `<span class="cost">${formatUSD(sum.costUsd)}</span> ${unpriced}`;
+  const known = formatCostTotals(sum.estimatedCost || [], sum.costMissing);
+  return `<span class="cost" title="Reference estimate from public token rates; not an actual bill">${known}</span> ${unpriced}`;
+}
+
+function currencyAmount(value, currency) {
+  const totals = value && value.estimatedCost || [];
+  const item = totals.find((entry) => entry.currency === currency);
+  return item && typeof item.amount === "string" ? item.amount : null;
+}
+
+function sumCurrencyTotals(values) {
+  const totals = new Map();
+  for (const value of values || []) {
+    for (const entry of value.estimatedCost || []) {
+      totals.set(entry.currency, (totals.get(entry.currency) || 0) + Number(entry.amount || 0));
+    }
+  }
+  return [...totals.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([currency, amount]) => ({ currency, amount: String(amount) }));
+}
+
+function formatCostTotals(totals, missing) {
+  if (!totals || totals.length === 0) return missing ? "—" : formatUSD(0);
+  return totals.map((entry) => entry.currency === "USD"
+    ? formatUSD(Number(entry.amount))
+    : `${escapeHTML(entry.currency)} ${Number(entry.amount).toLocaleString(undefined, { maximumFractionDigits: 12 })}`
+  ).join(" + ");
+}
+
+function metricValue(point, metric) {
+  if (metric === "costUsd") return Number(currencyAmount(point, "USD") || 0);
+  return Number(point && point[metric] || 0);
+}
+
+function metricMissing(point, metric) {
+  return metric === "costUsd" ? Boolean(point && point.costMissing) : Boolean(point && point.usageMissing);
+}
+
+function missingSuffix(point, metric) {
+  return metricMissing(point, metric) ? " + unknown" : "";
+}
+
+function changeCell(changes) {
+  if (!changes || changes.added === undefined || changes.removed === undefined) {
+    return '<span class="chip">unobserved</span>';
+  }
+  const files = changes.filesChanged === undefined ? "" : ` (${changes.filesChanged} files)`;
+  return `<span class="added">+${changes.added}</span> / <span class="removed">-${changes.removed}</span>${files}`;
+}
+
+function abandonedCell(summary) {
+  if (summary.abandonedInstructions === undefined || summary.abandonedInstructions === null) {
+    return '<span class="chip">not collected</span>';
+  }
+  return summary.abandonedInstructions > 0 ? `<span class="chip warn">${summary.abandonedInstructions} unmeasured</span>` : "";
 }
 
 // formatUSD renders a USD amount the way maatplug-web shows cost everywhere:

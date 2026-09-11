@@ -11,6 +11,7 @@ import (
 	"os"
 	"time"
 
+	"maatplug/internal/remotesync"
 	"maatplug/internal/store"
 	"maatplug/internal/usage"
 	"maatplug/internal/web"
@@ -20,6 +21,7 @@ func main() {
 	addr := flag.String("addr", "127.0.0.1:4173", "address to listen on (local-only by default; see docs/design.md section 9)")
 	dataDir := flag.String("data-dir", "", "maatplug data directory to read (default: $MAATPLUG_HOME, or the OS user config dir)")
 	usageInterval := flag.Duration("usage-poll-interval", 5*time.Minute, "how often to re-check Claude Code/Codex CLI remaining usage (see internal/usage)")
+	remoteSyncInterval := flag.Duration("remote-sync-interval", 10*time.Minute, "how often to re-sync SSH data areas (see internal/remotesync)")
 	flag.Parse()
 
 	s, err := resolveStore(*dataDir)
@@ -31,7 +33,10 @@ func main() {
 	poller := usage.NewPoller(usageCheckDir(s.Root), *usageInterval)
 	poller.Start(context.Background())
 
-	handler := web.NewServer(s, poller)
+	syncPoller := remotesync.NewPoller(s, resolveRemoteSyncInterval(s, *remoteSyncInterval))
+	syncPoller.Start(context.Background())
+
+	handler := web.NewServer(s, poller, syncPoller)
 	fmt.Printf("maatplug-web: serving %s on http://%s\n", s.Root, *addr)
 	if err := http.ListenAndServe(*addr, handler); err != nil {
 		fmt.Fprintln(os.Stderr, "maatplug-web: "+err.Error())
@@ -67,4 +72,29 @@ func resolveStore(dataDir string) (*store.Store, error) {
 		return &store.Store{Root: dataDir}, nil
 	}
 	return store.New()
+}
+
+// resolveRemoteSyncInterval prefers an explicitly-passed --remote-sync-interval
+// flag over whatever the settings screen has persisted (store.AppSettings)
+// — an explicit flag is a deliberate operator override; otherwise the
+// persisted value (edited from the web UI — see internal/web's
+// handleSaveAppSettings) is the current setting, and flagDefault (the
+// flag's own built-in default, unchanged) only applies to a fresh install
+// with no settings.json yet, where GetAppSettings already returns that same
+// default anyway.
+func resolveRemoteSyncInterval(s *store.Store, flagDefault time.Duration) time.Duration {
+	explicit := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "remote-sync-interval" {
+			explicit = true
+		}
+	})
+	if explicit {
+		return flagDefault
+	}
+	settings, err := s.GetAppSettings()
+	if err != nil {
+		return flagDefault
+	}
+	return time.Duration(settings.RemoteSyncIntervalMinutes) * time.Minute
 }

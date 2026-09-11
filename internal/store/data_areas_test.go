@@ -55,3 +55,49 @@ func TestDataAreas_DefaultCannotBeRemoved(t *testing.T) {
 		t.Fatal("RemoveDataArea(default) succeeded, want an error")
 	}
 }
+
+func TestDataAreas_AddSSH(t *testing.T) {
+	root := t.TempDir()
+	s := &Store{Root: root}
+
+	added, err := s.AddSSHDataArea("Build box", "myserver", "/home/me/.config/maatplug")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !added.IsSSH() || added.SSHHost != "myserver" || added.RemotePath != "/home/me/.config/maatplug" {
+		t.Fatalf("added area = %+v", added)
+	}
+	// Path must be a real, existing LOCAL directory under our own root —
+	// aggregate.All etc. read every area the same way via *store.Store{Root:
+	// area.Path}, regardless of Kind.
+	wantCacheDir := filepath.Join(root, "remote-cache", added.ID)
+	if added.Path != wantCacheDir {
+		t.Errorf("Path = %q, want %q", added.Path, wantCacheDir)
+	}
+	if info, err := os.Stat(added.Path); err != nil || !info.IsDir() {
+		t.Errorf("cache dir %q does not exist as a directory: %v", added.Path, err)
+	}
+
+	areas, err := s.ListDataAreas()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(areas) != 2 || areas[1].ID != added.ID {
+		t.Fatalf("areas after add = %+v", areas)
+	}
+
+	// Adding the exact same host+remote path again must be rejected.
+	if _, err := s.AddSSHDataArea("Build box again", "myserver", "/home/me/.config/maatplug"); err == nil {
+		t.Error("AddSSHDataArea duplicate host+remotePath succeeded, want an error")
+	}
+}
+
+func TestDataAreas_AddSSHRequiresHostAndPath(t *testing.T) {
+	s := &Store{Root: t.TempDir()}
+	if _, err := s.AddSSHDataArea("x", "", "/remote"); err == nil {
+		t.Error("AddSSHDataArea with empty host succeeded, want an error")
+	}
+	if _, err := s.AddSSHDataArea("x", "myserver", ""); err == nil {
+		t.Error("AddSSHDataArea with empty remote path succeeded, want an error")
+	}
+}

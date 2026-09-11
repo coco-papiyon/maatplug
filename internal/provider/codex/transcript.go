@@ -197,17 +197,29 @@ func normalizeUsage(usage *codexUsage) *model.TokenUsage {
 	if usage == nil {
 		return nil
 	}
+	if usage.Input < 0 || usage.CachedInput < 0 || usage.CacheWrite < 0 || usage.Output < 0 || usage.Total < 0 {
+		return nil
+	}
+	if usage.CachedInput+usage.CacheWrite > usage.Input {
+		return nil
+	}
+
+	// Codex reports cached/cache-write tokens as subsets of input_tokens and
+	// reasoning tokens as a subset of output_tokens. Reject an internally
+	// inconsistent record instead of persisting a plausible-looking but
+	// inaccurate total when an unknown transcript shape appears.
+	computedTotal := usage.Input + usage.Output
+	if usage.Total != 0 && usage.Total != computedTotal {
+		return nil
+	}
 
 	// cached_input_tokens/cache_write_input_tokens are included in
 	// input_tokens. Store exclusive buckets so TokenUsage retains the same
 	// meaning it has for the Claude adapter.
 	nonCachedInput := usage.Input - usage.CachedInput - usage.CacheWrite
-	if nonCachedInput < 0 {
-		nonCachedInput = 0
-	}
 	total := usage.Total
 	if total == 0 {
-		total = usage.Input + usage.Output
+		total = computedTotal
 	}
 	return &model.TokenUsage{
 		Input:         nonCachedInput,

@@ -1,0 +1,5 @@
+{"cwd":"C:\\redacted\\workspace","hook_event_name":"SessionStart","model":"gpt-5.6-sol","permission_mode":"never","session_id":"session-codex-001","source":"startup","transcript_path":"C:\\redacted\\.codex\\sessions\\session-codex-001.jsonl"}
+{"cwd":"C:\\redacted\\workspace","hook_event_name":"UserPromptSubmit","model":"gpt-5.6-sol","permission_mode":"never","prompt":"<redacted:user-prompt>","session_id":"session-codex-001","transcript_path":"C:\\redacted\\.codex\\sessions\\session-codex-001.jsonl","turn_id":"turn-codex-001"}
+{"cwd":"C:\\redacted\\workspace","hook_event_name":"Stop","last_assistant_message":"<redacted:assistant-message>","model":"gpt-5.6-sol","permission_mode":"never","session_id":"session-codex-001","stop_hook_active":false,"transcript_path":"C:\\redacted\\.codex\\sessions\\session-codex-001.jsonl","turn_id":"turn-codex-001"}
+{"cwd":"C:\\redacted\\workspace","hook_event_name":"SessionEnd","reason":"other","session_id":"session-codex-001","transcript_path":"C:\\redacted\\.codex\\sessions\\session-codex-001.jsonl"}
+

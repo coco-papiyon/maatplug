@@ -54,7 +54,7 @@ GitHub Copilot Chat（VSCode拡張）は、hookに相当する拡張ポイント
 
 | コンポーネント | 言語 | 理由 |
 |---|---|---|
-| `maatplug`（hook／exec-wrap＝書き込み、report／status＝簡易集計） | Go | 単一静的バイナリでクロスプラットフォーム配布が容易。hookやexec-wrapの起動先として外部実行ファイルである必要があり、Webアプリとモデル定義（`internal/model`）・集計ロジック（`internal/aggregate`）を共有できる。 |
+| `maatplug`（hook／exec-wrap＝書き込み、report／status＝簡易集計） | Go | 単一静的バイナリでクロスプラットフォーム配布が容易。hookやexec-wrapの起動先として外部実行ファイルである必要があり、Webアプリとモデル定義（`internal/model`）・問い合わせロジック（`internal/query`）を共有できる。 |
 | `maatplug-web`（参照用Webアプリ） | Go（指定通り） | `net/http`＋`go:embed`でフロントエンド一式を同梱し、Node不要で1バイナリに完結させる。フロントエンドはビルドチェーンを持たないvanilla JS＋Chart.js程度に留める（React/Vue等の重量フレームワークは採用しない）。 |
 | VSCode拡張（ダッシュボード表示専任） | TypeScript | VSCode Extension APIの制約上これ以外の選択肢がない。収集（書き込み）ロジックは持たず、hook／exec-wrapがClaude Code拡張・ターミナルのどちらから起動されても共通に発火する前提（6.4節）に乗る。拡張自身はフラットファイルを直接読んで表示するだけの薄いクライアント。 |
 
@@ -107,7 +107,7 @@ Claude Codeの`settings.json`の`hooks`機能を利用し、`SessionStart`／`Us
 
 - `SessionStart`: `cloc`実行→`session_start`書き込み。
 - `UserPromptSubmit`: stdinで渡される指示文を記録し、6.3節の方式でベースラインを取得。**instructionIdは自前で採番する**（後述）。
-- `Stop`: 現在のソース状態を再スナップショットしてベースラインとの差分を計算し`turn_end`を記録。トークン数は`transcript_path`（セッションのJSONLトランスクリプト）を読み、直近の「人間による本物の指示」行より後に現れる全`assistant`行の`usage`（input/output/cache tokens）を合算して取得する。
+- `Stop`: 現在のソース状態を再スナップショットしてベースラインとの差分を計算し`turn_end`を記録。トークン数は`transcript_path`（セッションのJSONLトランスクリプト）を読み、直近の「人間による本物の指示」行より後に現れる全assistant API応答の`usage`（input/output/cache tokens）を合算して取得する。Claude Codeは1回のAPI応答をthinking／tool_use／text等の複数`assistant`行に分け、各行へ同一usageを反復して記録することがあるため、`message.id`（無ければ`requestId`）が同じ行は1応答として1回だけ計上する。識別子が無い行は、別応答を誤ってまとめて過少計上しないよう従来どおり各行を計上する。
 - `SessionEnd`: `session_end`記録。
 
 **instructionIdの相関について**：Claude Codeのhookのstdinで、UserPromptSubmitとStopを相関させるID（`prompt_id`のようなフィールド）が渡される保証は確認できなかったため、そのようなフィールドには一切依存しない設計とした。代わりに`UserPromptSubmit`はinstructionIdを自前で採番してJSONLに書き込み、`Stop`は同じセッションのJSONLファイル自身から「まだ`turn_end`が付いていない`instruction`」をすべて検索して対応付ける（`internal/store.FindUnresolvedInstructions`）。
@@ -166,7 +166,7 @@ GitHub Copilot CLIは引き続き`maatplug exec copilot -- <指示>`によるexe
 
 ```
 maatplug init                      # データディレクトリ作成／Provider検出／Claude Codeへのhooks登録（実装済み）
-maatplug status                    # 現在プロジェクトの直近サマリ表示（自己完結。CLI内で直接JSONLを集計）（実装済み）
+maatplug status                    # 現在プロジェクトの直近サマリ表示（internal/queryを利用）（実装済み）
 maatplug report [--project P] [--format table|json]  # 同上、ターミナル向けの一表示形式（実装済み。--sinceは未実装）
 maatplug hook claude --event <SessionStart|UserPromptSubmit|Stop|SessionEnd>  # hookから呼ばれる内部コマンド（6.1節）（実装済み）
 maatplug exec <claude|codex|copilot> -- <指示...>   # exec-wrapアダプタ（6.2節）（未実装、Codex/Copilotアダプタと合わせて着手）
@@ -176,7 +176,7 @@ maatplug config get/set            # （未実装）
 
 Webアプリ（`maatplug-web`）は現状、`maatplug serve`のラッパー経由ではなく`cmd/maatplug-web`として直接ビルド・実行する別バイナリになっている（`maatplug-web --addr 127.0.0.1:4173 --data-dir ...`）。詳細は9節。
 
-集計ロジック（JSONLを読み、期間・Provider・プロジェクトで絞って合算する処理）は`internal/aggregate`パッケージとしてCLIとWebアプリ（どちらもGo）で共有する。ただしこれはコードの重複を避けるための**Go内での実装共有**であって、プロセス間の呼び出し関係ではない——`maatplug report`はこのパッケージをライブラリとして直接importして自分のプロセス内で完結し、Webアプリも同様に自分のプロセス内で完結する。両者は互いにサブプロセスを起動しない。
+新形式の読み取りは`internal/query`パッケージとしてCLIとWebアプリ（どちらもGo）で共有する。プロジェクト一覧では検証済みcatalog、詳細ではRunジャーナル、期間集計ではsummaryを選び、投影の欠落・破損・遅れは正本から再構築する。これはGo内での実装共有であり、CLIとWebは互いにサブプロセスを起動しない。旧sessionファイルの互換表示も`internal/query`内へ閉じ込める。
 
 集計結果には、指示・トークン合計・diff合計に加えて`abandonedInstructions`（6.1節の並行resume由来で`abandoned:true`となった`turn_end`の件数）を必ず含める。`abandoned`な`turn_end`はトークン・diffの合計には加算しない（合計を「実測した結果ゼロだった」と誤読させないため）。`status`はこれを`(N unmeasured/abandoned)`という注記として、`report`のtable形式は`ABANDONED`列として、JSON形式は`abandonedInstructions`フィールドとして、いずれも0件でなければ必ず可視化する。
 
@@ -187,11 +187,12 @@ Webアプリ（`maatplug-web`）は現状、`maatplug serve`のラッパー経�
 - `net/http`の標準`ServeMux`（Go 1.22で追加されたメソッド・パスパラメータ構文、例: `mux.HandleFunc("GET /api/projects/{id}/sessions", ...)`）のみを使用し、外部routerライブラリへの依存を持たない。`go.mod`に追加の依存は無い。
 - フロントエンドは`internal/web/frontend/`（`index.html`／`app.js`／`style.css`）に置き、`internal/web`パッケージの`//go:embed frontend`で同梱する。`go:embed`は自パッケージ配下のディレクトリしか埋め込めないため、design当初案の`web/frontend/`という最上位配置ではなく、埋め込み元の`internal/web`パッケージ配下に置く形に変更した。
 - 既定は`127.0.0.1:4173`バインド・認証なし。`--addr`で変更可能。`--data-dir`で読み取り先のデータディレクトリを明示的に指定できる（省略時は`store.New()`と同じ解決規則）。
-- 読み取り専用・**自己完結**。`maatplug`本体プロセスやCLIの`report`コマンドを一切呼び出さない。バックグラウンドでのインデックス化・ファイル監視は行わず、**HTTPリクエストのたびに`internal/aggregate`（ライブラリとして直接import）でJSONLを読み直す**。maatplug 1ユーザー分の記録量は小さく、都度読み直しても実用上問題にならないと判断し、当初検討したfsnotify／ポーリングによるインメモリキャッシュは見送った（データ量が増えて問題になった場合の改善余地として残す）。
+- 読み取り専用・**自己完結**。`maatplug`本体プロセスやCLIの`report`コマンドを呼び出さず、HTTPリクエストごとに`internal/query`を利用する。catalogとsummaryはファイル上の再生成可能な投影であり、常駐インメモリindexを必要としない。
 - 実装済みAPI
-  - `GET /api/projects` — `internal/aggregate.All` across the configured data areas
-  - `GET /api/projects/{id}/sessions` — `internal/aggregate.Sessions`（Provider・セッションID・開始時刻・指示数・トークン合計・diff合計・放棄件数）
-  - `GET /api/projects/{id}/sessions/{provider}/{sessionId}` — `internal/aggregate.SessionDetailFor`（cwd／開始時cloc／終了時cloc／指示ごとのタイムライン。存在しなければ404）
+  - `GET /api/projects` — `internal/query.ListProjects`を設定済みデータ領域ごとに実行
+  - `GET /api/projects/{id}/sessions` — `internal/query.Sessions`（Provider・セッション・Run・使用量・費用・操作・欠測）
+  - `GET /api/projects/{id}/sessions/{provider}/{sessionId}` — `internal/query.SessionView`による新形式の共通詳細（存在しなければ404）
+  - `GET /api/v1/projects/...`、`GET /api/collection-status` — 新形式のproject／work／期間／session／Run／entity詳細と収集診断
   - `GET /api/settings`、`POST /api/settings/areas`、`DELETE /api/settings/areas/{id}` — default data directory plus additional local, mounted, or network data areas. Removing an area removes only its dashboard registration, never the area contents.
 - 画面（すべて`app.js`のハッシュルーティングで実装、ビルドステップ無し）: プロジェクト一覧（`#/`） → セッション一覧（`#/project/:id`、Provider別） → セッション詳細（`#/project/:id/session/:provider/:sessionId`、指示ごとのカード表示：指示文／diff行数／トークン数、`abandoned`な指示には`unmeasured`バッジ）。clocのコード規模推移は、当初案のグラフ描画ではなく開始時／終了時の数値比較に簡略化した（Chart.js等の外部ライブラリを追加しない方針のため）。
 
@@ -199,7 +200,7 @@ Webアプリ（`maatplug-web`）は現状、`maatplug serve`のラッパー経�
 
 収集（書き込み）ロジックは全てGo側（`maatplug`のhook／exec、常に短命プロセス）に閉じているため、拡張機能は表示専任のクライアントで実現でき、feasibility上の懸念は特にない。集計（読み取り）も拡張機能内で自己完結させ、`maatplug` CLIや`maatplug-web`のサブプロセス起動には依存しない設計とする。
 
-- フラットファイルはJSONL（1行1JSON）という単純な形式であるため、TypeScript側で`~/.maatplug/projects/*/sessions/*.jsonl`を直接読み、拡張機能のプロセス内で集計する（Go側`internal/aggregate`と同等の集計ロジックをTSで再実装する形になるが、スキーマ自体がシンプルなためコスト・保守負荷は小さいと判断）。
+- VSCode拡張を実装する場合もイベントを独自解釈せず、`internal/query`と同じ問い合わせ契約を提供するローカルAPIを利用する。新形式の帰属・料金・欠測規則をTypeScriptへ重複実装しない。
 - ステータスバー: 当日のトークン使用量・指示数を表示（拡張機能内でファイル監視（`vscode.workspace.createFileSystemWatcher`相当）し、追記があれば差分だけ再計算）。
 - コマンド「Maatplug: Open Dashboard」→ WebViewで拡張機能自身がレンダリングするUIを表示（外部プロセスへのHTTPリクエストは発生しない）。
 - `maatplug`本体（Goバイナリ）が必要になるのは、Claude Codeへのhooks登録（`maatplug init`）や、Codex/CopilotをVSCode上から明示的に実行したい場合（`maatplug exec`をターミナルタスクとして呼ぶなど）に限られる。ダッシュボード閲覧だけならmaatplugバイナリ自体は不要（フラットファイルさえ存在すれば拡張機能単体で完結する）。収集自体はVSCode拡張が行うのではなく、6.4節の前提（Claude Codeのhookがターミナル/VSCode拡張どちらの利用も共通に捕捉する）に乗る点に注意。

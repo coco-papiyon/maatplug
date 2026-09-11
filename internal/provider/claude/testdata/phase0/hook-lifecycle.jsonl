@@ -1,0 +1,5 @@
+{"cwd":"C:\\redacted\\workspace","hook_event_name":"SessionStart","session_id":"session-claude-001","source":"startup","transcript_path":"C:\\redacted\\.claude\\projects\\project\\session-claude-001.jsonl"}
+{"cwd":"C:\\redacted\\workspace","hook_event_name":"UserPromptSubmit","permission_mode":"default","prompt":"<redacted:user-prompt>","prompt_id":"prompt-claude-001","session_id":"session-claude-001","transcript_path":"C:\\redacted\\.claude\\projects\\project\\session-claude-001.jsonl"}
+{"background_tasks":[],"cwd":"C:\\redacted\\workspace","effort":{"level":"high"},"hook_event_name":"Stop","last_assistant_message":"<redacted:assistant-message>","permission_mode":"default","prompt_id":"prompt-claude-001","session_crons":[],"session_id":"session-claude-001","stop_hook_active":false,"transcript_path":"C:\\redacted\\.claude\\projects\\project\\session-claude-001.jsonl"}
+{"cwd":"C:\\redacted\\workspace","hook_event_name":"SessionEnd","prompt_id":"prompt-claude-001","reason":"other","session_id":"session-claude-001","transcript_path":"C:\\redacted\\.claude\\projects\\project\\session-claude-001.jsonl"}
+
