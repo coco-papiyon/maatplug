@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"os"
 	"path/filepath"
 	"sort"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"maatplug/internal/attribution"
+	"maatplug/internal/billing"
 	"maatplug/internal/cost"
 	"maatplug/internal/inputcomposition"
 	"maatplug/internal/journal"
@@ -25,7 +27,7 @@ import (
 )
 
 const (
-	SchemaVersion      = 2
+	SchemaVersion      = 3
 	AggregationVersion = 1
 )
 
@@ -37,10 +39,13 @@ type InputCursor struct {
 }
 
 type PeriodSummary struct {
-	Period           string `json:"period"`
-	EventCount       uint64 `json:"eventCount"`
-	KnownUsageTokens int64  `json:"knownUsageTokens"`
-	UnknownUsage     bool   `json:"unknownUsage"`
+	Period           string               `json:"period"`
+	EventCount       uint64               `json:"eventCount"`
+	KnownUsageTokens int64                `json:"knownUsageTokens"`
+	UnknownUsage     bool                 `json:"unknownUsage"`
+	UsageMissing     bool                 `json:"usageMissing,omitempty"`
+	EstimatedCost    []cost.CurrencyTotal `json:"estimatedCost,omitempty"`
+	CostMissing      bool                 `json:"costMissing,omitempty"`
 }
 
 type RunSummary struct {
@@ -68,9 +73,26 @@ type RunSummary struct {
 }
 
 type Session struct {
-	Provider  string       `json:"provider"`
-	SessionID string       `json:"sessionId"`
-	Runs      []RunSummary `json:"runs"`
+	Provider    string         `json:"provider"`
+	SessionID   string         `json:"sessionId"`
+	Runs        []RunSummary   `json:"runs"`
+	Derivations SessionDerived `json:"derivations"`
+}
+
+// SessionDerived is the same shape of aggregate a Web session-list view
+// would otherwise have to recompute live from raw journal events on every
+// request (see query.Service.derive). Unlike DerivedSummary (project-level),
+// it only carries the active attribution policy and active pricing version
+// — a session list never shows alternate versions, so there is no reason to
+// pay for computing them here.
+type SessionDerived struct {
+	Usage            reconcile.Result          `json:"usage"`
+	InputComposition inputcomposition.Result   `json:"inputComposition"`
+	Attribution      attribution.Result        `json:"attribution"`
+	Cost             cost.Result               `json:"cost"`
+	Operations       operation.Result          `json:"operations"`
+	ActualSpend      billing.Summary           `json:"actualSpend"`
+	Missing          []model.FieldAvailability `json:"missing"`
 }
 
 type ProjectCatalog struct {
@@ -151,6 +173,7 @@ func (builder *Builder) rebuildProject(projectID string) (ProjectCatalog, error)
 	}
 	runs := make([]RunSummary, 0, len(paths))
 	allEvents := []model.EventEnvelope{}
+	sessionEvents := map[string][]model.EventEnvelope{}
 	for _, path := range paths {
 		route, events, err := builder.Journal.ReadPath(path)
 		if err != nil {
@@ -169,6 +192,8 @@ func (builder *Builder) rebuildProject(projectID string) (ProjectCatalog, error)
 			input.LastEventID = events[len(events)-1].EventID
 		}
 		allEvents = append(allEvents, events...)
+		sessionKey := route.Provider + "\x00" + route.SessionID
+		sessionEvents[sessionKey] = append(sessionEvents[sessionKey], events...)
 		run, err := summarizeRun(route, events, input)
 		if err != nil {
 			return ProjectCatalog{}, fmt.Errorf("summarize %s: %w", path, err)
@@ -265,11 +290,33 @@ func (builder *Builder) rebuildProject(projectID string) (ProjectCatalog, error)
 	if err != nil {
 		return ProjectCatalog{}, err
 	}
+	applyProjectCostPeriods(catalog.Periods, allEvents, usageProjection, activeCost)
 	operationProjection, err := operation.Build(builder.Root, allEvents)
 	if err != nil {
 		return ProjectCatalog{}, fmt.Errorf("build operation audit: %w", err)
 	}
 	catalog.Derivations = DerivedSummary{Usage: usageProjection, InputComposition: inputProjection, ActivePolicyVersion: activePolicy.Version, ActiveAttribution: activeAttribution, AttributionVersions: versions, ActiveCost: activeCost, CostVersions: costVersions, Operations: operationProjection}
+	billingRecords, err := (billing.Store{Root: builder.Root}).List()
+	if err != nil {
+		return ProjectCatalog{}, fmt.Errorf("list billing records: %w", err)
+	}
+	activePricing, hasActivePricing, err := (pricing.VersionStore{Root: builder.Root}).LoadActive()
+	if err != nil {
+		return ProjectCatalog{}, fmt.Errorf("load active pricing for sessions: %w", err)
+	}
+	var activePricingVersion *pricing.Version
+	if hasActivePricing {
+		activePricingVersion = &activePricing
+	}
+	for i := range catalog.Sessions {
+		session := &catalog.Sessions[i]
+		events := sessionEvents[session.Provider+"\x00"+session.SessionID]
+		derived, err := buildSessionDerived(builder.Root, projectID, events, activePolicy, activePricingVersion, billingRecords)
+		if err != nil {
+			return ProjectCatalog{}, fmt.Errorf("summarize session %s/%s: %w", session.Provider, session.SessionID, err)
+		}
+		session.Derivations = derived
+	}
 	if err := builder.writeProjection(catalog, runs); err != nil {
 		return ProjectCatalog{}, err
 	}
@@ -497,10 +544,11 @@ func applyProjectUsagePeriods(periods []PeriodSummary, events []model.EventEnvel
 	}
 	for index := range periods {
 		periods[index].KnownUsageTokens = 0
+		periods[index].UsageMissing = false
 		byDay[periods[index].Period] = &periods[index]
 	}
 	for _, decision := range usage.Decisions {
-		if decision.Role != reconcile.RoleCounted || decision.Tokens == nil {
+		if decision.Role != reconcile.RoleCounted {
 			continue
 		}
 		event, ok := byEvent[eventKey(decision.EventID)]
@@ -508,9 +556,228 @@ func applyProjectUsagePeriods(periods []PeriodSummary, events []model.EventEnvel
 			continue
 		}
 		day := event.Time.ReceivedAt.UTC().Format("2006-01-02")
-		if period := byDay[day]; period != nil {
-			period.KnownUsageTokens += *decision.Tokens
+		period := byDay[day]
+		if period == nil {
+			continue
 		}
+		if decision.Tokens == nil {
+			// Mirrors query.Trend's usageRows: a counted decision with no
+			// known token amount marks that day's usage as incomplete,
+			// distinct from UnknownUsage (a broader "some field on this day
+			// had uncertain availability" signal used by the Periods API).
+			period.UsageMissing = true
+			continue
+		}
+		period.KnownUsageTokens += *decision.Tokens
+	}
+}
+
+// applyProjectCostPeriods attributes each active-pricing cost line to the day
+// of the usage event it prices, the same way applyProjectUsagePeriods
+// attributes tokens — so Trend() can read day/cost totals straight out of
+// the catalog instead of re-running reconcile.Build/cost.Build over every
+// journal event on every request (see internal/query/trend.go usageRows).
+func applyProjectCostPeriods(periods []PeriodSummary, events []model.EventEnvelope, usage reconcile.Result, activeCost cost.Result) {
+	byEvent := make(map[string]model.EventEnvelope, len(events))
+	byDay := make(map[string]*PeriodSummary, len(periods))
+	for _, event := range events {
+		byEvent[eventKey(event.EventID)] = event
+	}
+	for index := range periods {
+		periods[index].EstimatedCost = nil
+		periods[index].CostMissing = false
+		byDay[periods[index].Period] = &periods[index]
+	}
+	priceByUsage := make(map[string]*cost.Record, len(activeCost.Records))
+	for i := range activeCost.Records {
+		priceByUsage[eventEntityKey(activeCost.Records[i].Usage)] = &activeCost.Records[i]
+	}
+	totals := map[string]map[string]*big.Rat{}
+	missingDays := map[string]bool{}
+	for _, decision := range usage.Decisions {
+		if decision.Role != reconcile.RoleCounted {
+			continue
+		}
+		event, ok := byEvent[eventKey(decision.EventID)]
+		if !ok {
+			continue
+		}
+		day := event.Time.ReceivedAt.UTC().Format("2006-01-02")
+		record := priceByUsage[eventEntityKey(decision.Usage)]
+		if record == nil {
+			missingDays[day] = true
+			continue
+		}
+		if record.Status != "calculated" && record.Status != "zero_usage" {
+			missingDays[day] = true
+		}
+		for _, line := range record.Lines {
+			if line.Amount == nil {
+				if line.Quantity != 0 {
+					missingDays[day] = true
+				}
+				continue
+			}
+			value, ok := new(big.Rat).SetString(*line.Amount)
+			if !ok || line.Currency == "" {
+				missingDays[day] = true
+				continue
+			}
+			if totals[day] == nil {
+				totals[day] = map[string]*big.Rat{}
+			}
+			if totals[day][line.Currency] == nil {
+				totals[day][line.Currency] = new(big.Rat)
+			}
+			totals[day][line.Currency].Add(totals[day][line.Currency], value)
+		}
+	}
+	for day, byCurrency := range totals {
+		period := byDay[day]
+		if period == nil {
+			continue
+		}
+		currencies := make([]string, 0, len(byCurrency))
+		for currency := range byCurrency {
+			currencies = append(currencies, currency)
+		}
+		sort.Strings(currencies)
+		for _, currency := range currencies {
+			period.EstimatedCost = append(period.EstimatedCost, cost.CurrencyTotal{Currency: currency, Amount: formatCostRat(byCurrency[currency])})
+		}
+	}
+	for day := range missingDays {
+		if period := byDay[day]; period != nil {
+			period.CostMissing = true
+		}
+	}
+}
+
+func formatCostRat(value *big.Rat) string {
+	s := value.FloatString(12)
+	s = strings.TrimRight(strings.TrimRight(s, "0"), ".")
+	if s == "" || s == "-0" {
+		return "0"
+	}
+	return s
+}
+
+// buildSessionDerived computes the same aggregate a live query.Service.derive
+// call would produce for one session's events, so Sessions() can read it
+// back from the catalog instead of recomputing it on every request. policy
+// and pricingVersion are always the active ones — a session-list row never
+// shows alternate attribution/pricing versions.
+func buildSessionDerived(root, projectID string, events []model.EventEnvelope, policy attribution.Policy, pricingVersion *pricing.Version, billingRecords []billing.Record) (SessionDerived, error) {
+	usage, err := reconcile.Build(events)
+	if err != nil {
+		return SessionDerived{}, err
+	}
+	inputComposition, err := inputcomposition.Build(events, usage)
+	if err != nil {
+		return SessionDerived{}, err
+	}
+	attr, err := attribution.Build(events, usage, policy)
+	if err != nil {
+		return SessionDerived{}, err
+	}
+	costResult, err := cost.Build(events, usage, pricingVersion)
+	if err != nil {
+		return SessionDerived{}, err
+	}
+	ops, err := operation.Build(root, events)
+	if err != nil {
+		return SessionDerived{}, err
+	}
+	spend, err := billing.Summarize(filterBilling(billingRecords, projectID, events))
+	if err != nil {
+		return SessionDerived{}, err
+	}
+	return SessionDerived{
+		Usage: usage, InputComposition: inputComposition, Attribution: attr, Cost: costResult,
+		Operations: ops, ActualSpend: spend, Missing: collectMissing(events, ops, costResult, attr),
+	}, nil
+}
+
+// collectMissing and the billing filter helpers below intentionally
+// duplicate internal/query's unexported equivalents (collectMissing,
+// filterBilling, filterBillingKeys, indexEventEntities) rather than import
+// internal/query from here — internal/query already imports
+// internal/catalog, so the reverse import would cycle.
+func collectMissing(events []model.EventEnvelope, ops operation.Result, c cost.Result, a attribution.Result) []model.FieldAvailability {
+	out := []model.FieldAvailability{}
+	for _, e := range events {
+		for _, v := range e.Availability {
+			if v.Status != model.AvailabilityObserved && v.Status != model.AvailabilityProviderReported && v.Status != model.AvailabilityInferred {
+				out = append(out, v)
+			}
+		}
+	}
+	for _, op := range ops.Operations {
+		out = append(out, op.Missing...)
+	}
+	if c.MissingCost {
+		out = append(out, model.FieldAvailability{Path: "cost.estimated", Status: model.AvailabilityUnknown, Reason: "one or more usage records could not be priced"})
+	}
+	if a.MissingUsage {
+		out = append(out, model.FieldAvailability{Path: "usage.attribution", Status: model.AvailabilityUnknown, Reason: "usage is incomplete"})
+	}
+	return out
+}
+
+func filterBilling(records []billing.Record, projectID string, events []model.EventEnvelope) []billing.Record {
+	entities := map[string]bool{}
+	for _, e := range events {
+		indexEventEntities(entities, e)
+		for _, r := range e.Relations {
+			entities[eventEntityKey(r.From)] = true
+			entities[eventEntityKey(r.To)] = true
+		}
+	}
+	return filterBillingKeys(records, projectID, entities)
+}
+
+func filterBillingKeys(records []billing.Record, projectID string, entities map[string]bool) []billing.Record {
+	out := []billing.Record{}
+	for _, r := range records {
+		matched := false
+		for _, ref := range append(append([]model.EntityRef{}, r.Usage...), r.Coverage...) {
+			if ref.Kind == model.EntityProject && ref.ID.Value == projectID {
+				matched = true
+			}
+			if entities[eventEntityKey(ref)] {
+				matched = true
+			}
+		}
+		if matched {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+func indexEventEntities(set map[string]bool, event model.EventEnvelope) {
+	for _, ref := range event.Scope {
+		set[eventEntityKey(ref)] = true
+	}
+	payload, err := event.DecodePayload()
+	if err != nil {
+		return
+	}
+	switch value := payload.(type) {
+	case *model.InstructionPayload:
+		set[eventEntityKey(value.Instruction)] = true
+	case *model.ModelCallPayload:
+		set[eventEntityKey(value.Call)] = true
+		set[eventEntityKey(value.Instruction)] = true
+	case *model.UsagePayload:
+		set[eventEntityKey(value.Usage)] = true
+		set[eventEntityKey(value.AppliesTo)] = true
+	case *model.OperationPayload:
+		set[eventEntityKey(value.Operation)] = true
+	case *model.OperationResultPayload:
+		set[eventEntityKey(value.Operation)] = true
+	case *model.ArtifactPayload:
+		set[eventEntityKey(value.Artifact)] = true
 	}
 }
 

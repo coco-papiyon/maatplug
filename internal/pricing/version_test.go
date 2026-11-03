@@ -22,6 +22,37 @@ func TestResolveEvaluatesPeriodThresholdAndConditions(t *testing.T) {
 	}
 }
 
+func TestResolve_UsesEarliestRecordedRateWhenUsagePredatesAllPricingHistory(t *testing.T) {
+	firstFetch := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	secondFetch := firstFetch.Add(24 * time.Hour)
+	usageBeforeAnyFetch := firstFetch.Add(-48 * time.Hour)
+	version := testVersion("v1", secondFetch, []Rate{
+		{ID: "second-fetch", Provider: "codex", ModelPattern: "gpt-x", UsageClass: "input_uncached", Currency: "USD", Amount: "3", UnitScale: 1_000_000, EffectiveFrom: secondFetch, SourceID: "manual"},
+		// EffectiveTo mirrors what VersionStore actually does when a rate is
+		// superseded by a later fetch (closes the old one at the new one's
+		// EffectiveFrom) — without it, both rates would still apply at
+		// secondFetch and this would be a genuine ResolutionConflict instead
+		// of exercising the fallback path this test targets.
+		{ID: "first-fetch", Provider: "codex", ModelPattern: "gpt-x", UsageClass: "input_uncached", Currency: "USD", Amount: "2", UnitScale: 1_000_000, EffectiveFrom: firstFetch, EffectiveTo: &secondFetch, SourceID: "manual"},
+	})
+
+	// Usage from before either fetch ever ran falls back to the earliest
+	// (first-fetched) rate instead of coming back unregistered — there is no
+	// earlier price on record to be more correct than that.
+	got := version.Resolve(Query{Provider: "codex", Model: "gpt-x", UsageClass: "input_uncached", Quantity: 100, At: usageBeforeAnyFetch})
+	if got.Status != ResolutionResolved || got.Rate == nil || got.Rate.ID != "first-fetch" {
+		t.Fatalf("fallback to earliest rate = %+v, want resolved with rate \"first-fetch\"", got)
+	}
+
+	// Usage that actually falls within a recorded rate's window still
+	// resolves to that rate normally — the fallback only fires when nothing
+	// applies at all, never displacing a real match.
+	got = version.Resolve(Query{Provider: "codex", Model: "gpt-x", UsageClass: "input_uncached", Quantity: 100, At: secondFetch})
+	if got.Status != ResolutionResolved || got.Rate == nil || got.Rate.ID != "second-fetch" {
+		t.Fatalf("normal in-window match = %+v, want resolved with rate \"second-fetch\"", got)
+	}
+}
+
 func TestResolveReportsEqualSpecificityConflict(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	version := testVersion("v1", now, []Rate{

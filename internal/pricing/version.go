@@ -12,6 +12,16 @@ import (
 
 const VersionSchema = 1
 
+// ServiceAPI is the only service tier RatesFromModels ever produces (public
+// per-token API pricing, scraped from each provider's pricing page — see
+// RatesFromModels's doc comment). internal/cost.Build's default Options use
+// it so the everyday dashboard/report cost path resolves against these
+// rates without every caller having to know to ask for "api" explicitly;
+// Version.Resolve still treats a rate's non-empty Service as a required
+// condition (docs/pricing-and-billing-phase5.md), which is what lets a
+// manually-imported contract rate for a different service tier coexist.
+const ServiceAPI = "api"
+
 var decimalPattern = regexp.MustCompile(`^-?(0|[1-9][0-9]*)(\.[0-9]+)?$`)
 
 type SourceDocument struct {

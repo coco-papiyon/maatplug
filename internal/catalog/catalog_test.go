@@ -115,6 +115,12 @@ func TestCatalogKeepsCostResultsForHistoricalPricingVersions(t *testing.T) {
 	if len(projection.Derivations.CostVersions) != 2 || len(projection.Derivations.CostVersions[1].ChangeFromBase.ChangedUsage) != 1 {
 		t.Fatalf("cost versions = %+v", projection.Derivations.CostVersions)
 	}
+	if len(projection.Sessions) != 1 || len(projection.Sessions[0].Derivations.Cost.KnownTotals) != 1 || projection.Sessions[0].Derivations.Cost.KnownTotals[0].Amount != "3" {
+		t.Fatalf("session cost = %+v", projection.Sessions[0].Derivations)
+	}
+	if len(projection.Periods) != 1 || len(projection.Periods[0].EstimatedCost) != 1 || projection.Periods[0].EstimatedCost[0].Currency != "USD" || projection.Periods[0].EstimatedCost[0].Amount != "3" || projection.Periods[0].CostMissing {
+		t.Fatalf("period cost = %+v", projection.Periods)
+	}
 }
 
 func catalogUsageEvent(eventID, usageID, targetID string, tokens int64, runID string) model.EventEnvelope {

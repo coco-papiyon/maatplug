@@ -17,7 +17,11 @@ import (
 	"maatplug/internal/store"
 )
 
-const transcriptCursorVersion = 1
+const (
+	transcriptCursorVersion = 1
+	transcriptChunkMaxLines = 500
+	transcriptChunkMaxBytes = 4 << 20
+)
 
 type transcriptCursor struct {
 	Version    int      `json:"version"`
@@ -48,6 +52,7 @@ func (worker *Collector) readTranscript(provider, path string) (provideradapter.
 	if err != nil {
 		return result, err
 	}
+	result.TotalBytes = info.Size()
 	firstLine, err := firstCompleteLine(file)
 	if err != nil {
 		return result, err
@@ -71,31 +76,29 @@ func (worker *Collector) readTranscript(provider, path string) (provideradapter.
 	if _, err := file.Seek(cursor.ByteOffset, io.SeekStart); err != nil {
 		return result, err
 	}
-	data, err := io.ReadAll(file)
-	if err != nil {
-		return result, err
-	}
-	completeLength := 0
-	if index := bytes.LastIndexByte(data, '\n'); index >= 0 {
-		completeLength = index + 1
-	}
-	result.IncompleteTail = completeLength < len(data)
-	complete := data[:completeLength]
 	offset := cursor.ByteOffset
 	lineNo := cursor.Line
-	for len(complete) > 0 {
-		index := bytes.IndexByte(complete, '\n')
-		line := bytes.TrimSuffix(complete[:index], []byte{'\r'})
-		consumed := index + 1
+	reader := bufio.NewReaderSize(file, 64*1024)
+	for len(result.Lines) < transcriptChunkMaxLines && offset-cursor.ByteOffset < transcriptChunkMaxBytes {
+		raw, readErr := reader.ReadBytes('\n')
+		if errors.Is(readErr, io.EOF) {
+			result.IncompleteTail = len(raw) > 0
+			break
+		}
+		if readErr != nil {
+			return result, readErr
+		}
+		consumed := len(raw)
+		line := bytes.TrimSuffix(raw[:consumed-1], []byte{'\r'})
 		if len(bytes.TrimSpace(line)) > 0 {
 			result.Lines = append(result.Lines, provideradapter.Line{Number: lineNo, ByteOffset: offset, Data: append([]byte(nil), line...)})
 		}
 		offset += int64(consumed)
 		lineNo++
-		complete = complete[consumed:]
 	}
-	result.NextByteOffset = cursor.ByteOffset + int64(completeLength)
+	result.NextByteOffset = offset
 	result.NextLine = lineNo
+	result.HasMore = result.NextByteOffset < result.TotalBytes && !result.IncompleteTail
 	return result, nil
 }
 

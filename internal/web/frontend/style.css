@@ -302,41 +302,70 @@ th.num .th-inner { justify-content: flex-end; }
   margin-bottom: 0.4rem;
 }
 .turn .ts { color: var(--muted); font-size: 0.78rem; white-space: nowrap; }
-.turn .instruction-details { margin: 0.3rem 0 0.6rem; }
-.turn .instruction-details summary {
-  position: relative;
-  list-style: none;
-  cursor: default;
-}
-.turn .instruction-details summary::-webkit-details-marker { display: none; }
-.turn .instruction-preview {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.turn .instruction-details.expandable summary {
-  cursor: pointer;
-  padding-right: 5.5rem;
-}
-.turn .instruction-details.expandable summary::after {
-  content: "全文を表示";
-  position: absolute;
-  top: 0;
-  right: 0;
-  color: var(--accent);
-  font-size: 0.75rem;
-  white-space: nowrap;
-}
-.turn .instruction-details[open] summary::after { content: "閉じる"; }
-.turn .instruction-details[open] .instruction-preview { display: none; }
 .turn .text {
   white-space: pre-wrap;
   margin: 0.45rem 0 0;
 }
-.turn .metrics { display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.85rem; color: var(--muted); }
-.turn .metrics .added { color: var(--good); }
-.turn .metrics .removed { color: var(--bad); }
+
+.instructions-table td.ts { white-space: nowrap; }
+.instructions-table .instruction-cell {
+  max-width: 28rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.instructions-table tbody tr[data-instruction-index] { cursor: pointer; }
+.instructions-table tbody tr[data-instruction-index]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.instruction-dialog {
+  width: min(46rem, calc(100vw - 2.5rem));
+  max-height: min(80vh, 44rem);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--fg);
+}
+.instruction-dialog::backdrop { background: rgba(0, 0, 0, 0.35); }
+.instruction-dialog .dialog-content { padding: 1.1rem 1.3rem 1.3rem; overflow-y: auto; }
+.instruction-dialog .dialog-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  margin-bottom: 0.6rem;
+}
+.instruction-dialog .dialog-close {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.1rem 0.3rem;
+}
+.instruction-dialog .dialog-close:hover { color: var(--fg); }
+
+.operation-list { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.6rem; }
+.operation-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+  padding: 0.35rem 0.5rem;
+  background: var(--surface);
+  border-radius: 6px;
+}
+.operation-row code { overflow-wrap: anywhere; }
+.op-targets { color: var(--muted); font-size: 0.78rem; overflow-wrap: anywhere; }
+
+.raw-events { margin-top: 1.5rem; }
+.raw-events > summary { cursor: pointer; color: var(--muted); font-size: 0.85rem; margin-bottom: 0.6rem; }
+.raw-events .turn .text { font-size: 0.78rem; }
 
 nav.pager { margin-top: 1.5rem; }
 

@@ -52,6 +52,13 @@ type pointAccumulator struct {
 
 func (service *Service) Trend(projectID string, filter Filter) ([]DailyPoint, error) {
 	filter, dates := service.trendWindow(filter)
+	if filter.Provider == "" {
+		// The common case (no provider filter) is answered entirely from
+		// each project's catalog — precomputed once per collect cycle,
+		// see catalog.applyProjectCostPeriods — instead of re-reading and
+		// re-pricing every journal event on every dashboard load.
+		return service.trendPointsFromCatalog(projectID, dates)
+	}
 	rows, unknown, err := service.usageRows(projectID, filter)
 	if err != nil {
 		return nil, err
@@ -68,6 +75,61 @@ func (service *Service) Trend(projectID string, filter Filter) ([]DailyPoint, er
 		addRecordCost(acc, row.price)
 	}
 	if unknown && len(dates) > 0 {
+		ensurePoint(byDay, dates[len(dates)-1]).point.UsageMissing = true
+	}
+	result := make([]DailyPoint, 0, len(dates))
+	for _, day := range dates {
+		acc := ensurePoint(byDay, day)
+		finishPoint(acc)
+		result = append(result, acc.point)
+	}
+	return result, nil
+}
+
+// trendPointsFromCatalog answers Trend for the no-provider-filter case out
+// of each project's catalog.Periods (tokens and active-pricing cost, both
+// already attributed per day at collect time) rather than re-scanning raw
+// journal events. projectID == "" merges every project in the store, the
+// same scope usageRows uses.
+func (service *Service) trendPointsFromCatalog(projectID string, dates []string) ([]DailyPoint, error) {
+	ids := []string{projectID}
+	if projectID == "" {
+		var err error
+		ids, err = (&store.Store{Root: service.Root}).ListProjectIDs()
+		if err != nil {
+			return nil, err
+		}
+	}
+	byDay := map[string]*pointAccumulator{}
+	unknownProject := false
+	for _, id := range ids {
+		paths, err := journal.New(service.Root).ListProjectStreams(id)
+		if err != nil {
+			return nil, err
+		}
+		if len(paths) == 0 {
+			continue
+		}
+		projection, err := service.catalog(id)
+		if err != nil {
+			return nil, err
+		}
+		unknownProject = unknownProject || projection.UnknownUsage
+		for _, period := range projection.Periods {
+			acc := ensurePoint(byDay, period.Period)
+			acc.point.TotalTokens += period.KnownUsageTokens
+			if period.UsageMissing {
+				acc.point.UsageMissing = true
+			}
+			if period.CostMissing {
+				acc.point.CostMissing = true
+			}
+			for _, total := range period.EstimatedCost {
+				addDecimal(acc, total.Currency, total.Amount)
+			}
+		}
+	}
+	if unknownProject && len(dates) > 0 {
 		ensurePoint(byDay, dates[len(dates)-1]).point.UsageMissing = true
 	}
 	result := make([]DailyPoint, 0, len(dates))

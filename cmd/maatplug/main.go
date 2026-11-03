@@ -76,8 +76,8 @@ Usage:
   maatplug report [--project <id>] [--format table|json]
       Print a detailed summary per project.
 
-  maatplug collect --once
-  maatplug collect --watch [--interval <duration>]
+  maatplug collect --once [--heartbeat <duration>]
+  maatplug collect --watch [--interval <duration>] [--heartbeat <duration>]
       Move inbox records into content objects, journals, and catalogs.
 
   maatplug rebuild-catalog [--project <id>]

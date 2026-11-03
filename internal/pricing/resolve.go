@@ -54,6 +54,11 @@ func (version Version) Resolve(query Query) Resolution {
 		}
 	}
 	if len(applicable) == 0 {
+		if len(unknown) == 0 {
+			if fallback := earliestApplicable(version.Rates, query); fallback != nil {
+				return Resolution{Status: ResolutionResolved, Rate: fallback, Candidates: []string{fallback.ID}, Reason: "usage predates the earliest recorded price for this model; using the first price on record instead of leaving it unpriced"}
+			}
+		}
 		sort.Strings(unknown)
 		if len(unknown) > 0 {
 			return Resolution{Status: ResolutionConditionUnknown, Candidates: unknown, Reason: "a matching rate requires service, contract, or attribute values that were not observed"}
@@ -82,6 +87,22 @@ func (version Version) Resolve(query Query) Resolution {
 }
 
 func matches(rate Rate, query Query) (matched, missing bool) {
+	if !query.At.IsZero() && (query.At.Before(rate.EffectiveFrom) || rate.EffectiveTo != nil && !query.At.Before(*rate.EffectiveTo)) {
+		return false, false
+	}
+	matched, missing = coreMatches(rate, query)
+	if matched && query.At.IsZero() {
+		missing = true
+	}
+	return matched, missing
+}
+
+// coreMatches checks every condition a rate must satisfy except its
+// effective-date window: provider, usage class, model pattern, quantity
+// thresholds, service, contract, and attributes. matches uses it for normal
+// resolution; earliestApplicable uses it on its own (skipping the date
+// window entirely) to find rates that would otherwise apply to query.
+func coreMatches(rate Rate, query Query) (matched, missing bool) {
 	if rate.Provider != query.Provider || rate.UsageClass != query.UsageClass || query.Quantity < 0 {
 		return false, false
 	}
@@ -92,10 +113,7 @@ func matches(rate Rate, query Query) (matched, missing bool) {
 	if rate.MinQuantity != nil && query.Quantity < *rate.MinQuantity || rate.MaxQuantity != nil && query.Quantity > *rate.MaxQuantity {
 		return false, false
 	}
-	if !query.At.IsZero() && (query.At.Before(rate.EffectiveFrom) || rate.EffectiveTo != nil && !query.At.Before(*rate.EffectiveTo)) {
-		return false, false
-	}
-	conditionMissing := query.At.IsZero()
+	conditionMissing := false
 	for _, actual := range [][2]string{{rate.Service, query.Service}, {rate.Contract, query.Contract}} {
 		if actual[0] != "" && actual[1] != "" && actual[0] != actual[1] {
 			return false, false
@@ -113,6 +131,36 @@ func matches(rate Rate, query Query) (matched, missing bool) {
 		return false, true
 	}
 	return true, false
+}
+
+// earliestApplicable finds, among rates that would otherwise match query
+// (same provider/model/usage-class/service/contract/attributes/quantity)
+// but whose EffectiveFrom postdates query.At, the one with the earliest
+// EffectiveFrom — the first price maatplug ever recorded for it. Resolve
+// only calls this once normal matching finds nothing at all: a usage
+// record from before the earliest known price for its model has no
+// earlier price to apply, so the first price on record is the best
+// available stand-in rather than leaving the usage permanently unpriced —
+// per the user's call: when no pricing data exists yet for that time,
+// use whatever was first acquired.
+func earliestApplicable(rates []Rate, query Query) *Rate {
+	if query.At.IsZero() {
+		return nil
+	}
+	var best *Rate
+	for index := range rates {
+		rate := &rates[index]
+		if !query.At.Before(rate.EffectiveFrom) {
+			continue
+		}
+		if matched, missing := coreMatches(*rate, query); !matched || missing {
+			continue
+		}
+		if best == nil || rate.EffectiveFrom.Before(best.EffectiveFrom) {
+			best = rate
+		}
+	}
+	return best
 }
 
 func specificity(rate Rate) int {

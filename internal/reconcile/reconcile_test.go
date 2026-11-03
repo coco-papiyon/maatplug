@@ -30,6 +30,75 @@ func TestBuildSelectsFinalObservationOnceAndKeepsDistinctCalls(t *testing.T) {
 	}
 }
 
+func TestBuildCreditsResidualWhenRunCumulativeExceedsCoveredDeltas(t *testing.T) {
+	// call-1's own delta is counted, but the run-level cumulative (whose
+	// own target is the run itself, like Codex's turn-level running total)
+	// reports more than that delta alone accounts for — e.g. a sibling
+	// response whose usage never normalized into its own delta. The
+	// uncovered remainder should be preserved as a residual, not discarded
+	// outright, the same way explicit parent/child containment behaves.
+	delta := usageEvent("call-1-delta", "usage-a", "call-1", 20, model.CounterDelta, model.MeasurementFinal, "g", 1)
+	cumulative := usageEvent("run-cumulative", "usage-run", "run-1", 50, model.CounterCumulative, model.MeasurementFinal, "g", 2)
+	result, err := Build([]model.EventEnvelope{delta, cumulative})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.KnownSubtotal != 20 || result.Undecomposed != 30 || len(result.Residuals) != 1 {
+		t.Fatalf("result = %+v", result)
+	}
+	if !hasSelected(result, "call-1-delta") || hasSelected(result, "run-cumulative") {
+		t.Fatalf("selected = %+v", result.SelectedEventIDs)
+	}
+}
+
+func TestBuildExcludesRunCumulativeFullyCoveredByDeltas(t *testing.T) {
+	// The inverse of the above: once counted deltas already account for the
+	// run cumulative's whole total, the cumulative is fully redundant and
+	// stays excluded (no residual, no partial credit) — this is the
+	// "safe to drop" case the coverage check exists to distinguish from
+	// the case above.
+	deltaA := usageEvent("call-1-delta", "usage-a", "call-1", 20, model.CounterDelta, model.MeasurementFinal, "g", 1)
+	deltaB := usageEvent("call-2-delta", "usage-b", "call-2", 20, model.CounterDelta, model.MeasurementFinal, "g", 2)
+	cumulative := usageEvent("run-cumulative", "usage-run", "run-1", 40, model.CounterCumulative, model.MeasurementFinal, "g", 3)
+	result, err := Build([]model.EventEnvelope{deltaA, deltaB, cumulative})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.KnownSubtotal != 40 || result.Undecomposed != 0 || len(result.Residuals) != 0 {
+		t.Fatalf("result = %+v", result)
+	}
+	if hasSelected(result, "run-cumulative") {
+		t.Fatalf("selected = %+v", result.SelectedEventIDs)
+	}
+}
+
+func TestBuildFallsBackToOlderCumulativeWhenNewestCannotBeNormalized(t *testing.T) {
+	// Two comparable cumulative values for the same target/generation, no
+	// delta detail available at all. The newest one failed to normalize
+	// (e.g. a provider format hiccup); rather than discarding the whole
+	// running total, the newest *older* value that does have a usable
+	// total is used instead.
+	newer := usageEvent("newer", "usage-newer", "run-1", 0, model.CounterCumulative, model.MeasurementFinal, "g", 2)
+	var payload model.UsagePayload
+	if err := json.Unmarshal(newer.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	payload.Normalized = nil
+	newer.Payload, _ = json.Marshal(payload)
+	older := usageEvent("older", "usage-older", "run-1", 25, model.CounterCumulative, model.MeasurementFinal, "g", 1)
+
+	result, err := Build([]model.EventEnvelope{older, newer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.KnownSubtotal != 25 || !result.Unknown {
+		t.Fatalf("result = %+v", result)
+	}
+	if !hasSelected(result, "older") || hasSelected(result, "newer") {
+		t.Fatalf("selected = %+v", result.SelectedEventIDs)
+	}
+}
+
 func TestBuildReconcilesContainingParentAndChildren(t *testing.T) {
 	parent := usageEvent("parent", "parent", "run-1", 60, model.CounterDelta, model.MeasurementFinal, "g", 1)
 	childA := usageEvent("child-a", "child-a", "call-a", 10, model.CounterDelta, model.MeasurementFinal, "g", 2)

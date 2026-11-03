@@ -3,10 +3,10 @@ setlocal
 
 cd /d "%~dp0"
 
-echo Installing maatplug...
-go install ./cmd/maatplug
+echo Installing maatplug and maatplug-web...
+go install ./cmd/maatplug ./cmd/maatplug-web
 if errorlevel 1 (
-    echo Failed to install maatplug.
+    echo Failed to install maatplug binaries.
     exit /b 1
 )
 
@@ -32,11 +32,18 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo Starting maatplug-web...
-go run .\cmd\maatplug-web
-if errorlevel 1 (
-    echo Failed to start maatplug-web.
+if not exist "%MAATPLUG_GOBIN%\maatplug.exe" (
+    echo maatplug.exe was not found in %MAATPLUG_GOBIN%.
     exit /b 1
 )
+if not exist "%MAATPLUG_GOBIN%\maatplug-web.exe" (
+    echo maatplug-web.exe was not found in %MAATPLUG_GOBIN%.
+    exit /b 1
+)
+
+echo Starting maatplug-web (spawns the collector as its own child process)...
+echo Open http://127.0.0.1:4173
+echo Press Ctrl+C to stop.
+"%MAATPLUG_GOBIN%\maatplug-web.exe" --addr 127.0.0.1:4173
 
 endlocal

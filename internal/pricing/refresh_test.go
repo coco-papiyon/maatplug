@@ -29,7 +29,9 @@ func TestRefreshWorkerPersistsSuccessFailureAndFreshness(t *testing.T) {
 		t.Fatalf("stats = %+v", stats)
 	}
 	active, ok, err := (VersionStore{Root: root}).LoadActive()
-	if err != nil || !ok || len(active.Rates) != 3 {
+	// 3 usage classes (input/cached input/output) x 2 rates each (the bare
+	// model pattern plus a dated-snapshot variant — see RatesFromModels).
+	if err != nil || !ok || len(active.Rates) != 6 {
 		t.Fatalf("active = %+v, %v, %v", active, ok, err)
 	}
 	bad, err := worker.loadState(worker.Sources[1])
@@ -59,7 +61,7 @@ func TestRefreshWorkerPersistsSuccessFailureAndFreshness(t *testing.T) {
 			closed++
 		}
 	}
-	if err != nil || !ok || len(active.Rates) != 6 || closed != 3 {
+	if err != nil || !ok || len(active.Rates) != 12 || closed != 6 {
 		t.Fatalf("historical rates = %+v, %v, %v", active, ok, err)
 	}
 	if len(active.Sources) != 1 || active.Sources[0].Digest == "" {

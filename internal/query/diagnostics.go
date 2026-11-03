@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"maatplug/internal/collector"
@@ -28,6 +29,25 @@ type PricingHealth struct {
 	ActiveVersion string                `json:"activeVersion,omitempty"`
 	Missing       bool                  `json:"missing"`
 	StaleSources  []string              `json:"staleSources"`
+	// Rates is the active pricing version's currently-effective rates (one
+	// row per provider/model/usage-class), so the collection-status page can
+	// show the actual prices maatplug fetched — not just that some pricing
+	// version exists — which is what actually answers "is cost estimation
+	// working." Rows superseded by a later fetch (EffectiveTo set) and the
+	// dated-snapshot-id pattern variant of each rate (see
+	// pricing.RatesFromModels) are both omitted as noise: the dated variant
+	// always has the same price as its bare-pattern counterpart already
+	// listed here.
+	Rates []PricingRateSummary `json:"rates"`
+}
+
+type PricingRateSummary struct {
+	Provider     string `json:"provider"`
+	ModelPattern string `json:"modelPattern"`
+	UsageClass   string `json:"usageClass"`
+	Currency     string `json:"currency"`
+	Amount       string `json:"amount"`
+	UnitScale    int64  `json:"unitScale"`
 }
 
 type Coverage struct {
@@ -200,9 +220,25 @@ func (service *Service) pricingHealth(now time.Time) (PricingHealth, error) {
 	if err != nil {
 		return PricingHealth{}, err
 	}
-	result := PricingHealth{Sources: states, Missing: !ok, StaleSources: []string{}}
+	result := PricingHealth{Sources: states, Missing: !ok, StaleSources: []string{}, Rates: []PricingRateSummary{}}
 	if ok {
 		result.ActiveVersion = active.Version
+		for _, rate := range active.Rates {
+			if rate.EffectiveTo != nil || strings.Contains(rate.ModelPattern, "?") {
+				continue
+			}
+			result.Rates = append(result.Rates, PricingRateSummary{Provider: rate.Provider, ModelPattern: rate.ModelPattern, UsageClass: rate.UsageClass, Currency: rate.Currency, Amount: rate.Amount, UnitScale: rate.UnitScale})
+		}
+		sort.Slice(result.Rates, func(i, j int) bool {
+			a, b := result.Rates[i], result.Rates[j]
+			if a.Provider != b.Provider {
+				return a.Provider < b.Provider
+			}
+			if a.ModelPattern != b.ModelPattern {
+				return a.ModelPattern < b.ModelPattern
+			}
+			return a.UsageClass < b.UsageClass
+		})
 	}
 	for _, s := range states {
 		if !s.Complete || s.LastSuccess == nil || s.FreshUntil == nil || now.After(*s.FreshUntil) {

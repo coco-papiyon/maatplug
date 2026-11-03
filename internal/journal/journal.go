@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -120,14 +121,41 @@ type scanResult struct {
 // crash occurs after the append but before the checkpoint, the next attempt
 // rescans the journal and returns Duplicate without adding a second line.
 func (journal *Journal) Append(route Route, event model.EventEnvelope) (AppendResult, error) {
-	if err := event.Validate(); err != nil {
-		return AppendResult{}, fmt.Errorf("validate event: %w", err)
-	}
-	path, err := journal.StreamPath(route)
+	results, err := journal.AppendBatch(route, []model.EventEnvelope{event})
 	if err != nil {
 		return AppendResult{}, err
 	}
-	result := AppendResult{Path: path}
+	return results[0], nil
+}
+
+// AppendBatch appends several events for one stream while scanning, syncing,
+// and checkpointing the journal only once. Results correspond to events in
+// input order. A retry after a partial write remains safe because the next
+// scan recognizes every complete line by event ID.
+func (journal *Journal) AppendBatch(route Route, events []model.EventEnvelope) ([]AppendResult, error) {
+	path, err := journal.StreamPath(route)
+	if err != nil {
+		return nil, err
+	}
+	if len(events) == 0 {
+		return []AppendResult{}, nil
+	}
+	type preparedEvent struct {
+		event     model.EventEnvelope
+		canonical []byte
+	}
+	prepared := make([]preparedEvent, len(events))
+	for index, event := range events {
+		if err := event.Validate(); err != nil {
+			return nil, fmt.Errorf("validate event %d: %w", index, err)
+		}
+		canonical, err := json.Marshal(event)
+		if err != nil {
+			return nil, err
+		}
+		prepared[index] = preparedEvent{event: event, canonical: canonical}
+	}
+	results := make([]AppendResult, len(events))
 	err = store.WithFileLock(path, func() error {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return err
@@ -139,50 +167,57 @@ func (journal *Journal) Append(route Route, event model.EventEnvelope) (AppendRe
 		if err != nil {
 			return err
 		}
-		key := idKey(event.EventID)
-		canonical, err := json.Marshal(event)
-		if err != nil {
-			return err
+		positions := make(map[string]uint64, len(scanned.Events))
+		for index, event := range scanned.Events {
+			positions[idKey(event.EventID)] = uint64(index)
 		}
-		if existing, found := scanned.Canonical[key]; found {
-			var existingEvent model.EventEnvelope
-			if json.Unmarshal(existing, &existingEvent) != nil || !sameObservation(existingEvent, event) {
-				return fmt.Errorf("event ID %s already exists with different content", key)
-			}
-			result.Duplicate = true
-			for index, existingEvent := range scanned.Events {
-				if existingEvent.EventID == event.EventID {
-					result.Position = uint64(index)
-					break
+		var pending bytes.Buffer
+		for index, item := range prepared {
+			result := AppendResult{Path: path}
+			key := idKey(item.event.EventID)
+			if existing, found := scanned.Canonical[key]; found {
+				var existingEvent model.EventEnvelope
+				if json.Unmarshal(existing, &existingEvent) != nil || !sameObservation(existingEvent, item.event) {
+					return fmt.Errorf("event ID %s already exists with different content", key)
 				}
+				result.Duplicate = true
+				result.Position = positions[key]
+				results[index] = result
+				continue
 			}
-			return journal.writeCheckpoint(route, path, scanned)
+			result.Position = uint64(len(scanned.Events))
+			line := append(item.canonical, '\n')
+			_, _ = pending.Write(line)
+			scanned.Events = append(scanned.Events, item.event)
+			scanned.Canonical[key] = item.canonical
+			scanned.ByteOffset += int64(len(line))
+			positions[key] = result.Position
+			indexRelationships(scanned, item.event)
+			results[index] = result
 		}
-
-		file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-		if err != nil {
-			return err
+		if pending.Len() > 0 {
+			file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+			if err != nil {
+				return err
+			}
+			written, writeErr := file.Write(pending.Bytes())
+			if writeErr == nil && written != pending.Len() {
+				writeErr = io.ErrShortWrite
+			}
+			if writeErr == nil {
+				writeErr = file.Sync()
+			}
+			closeErr := file.Close()
+			if writeErr != nil {
+				return writeErr
+			}
+			if closeErr != nil {
+				return closeErr
+			}
 		}
-		line := append(canonical, '\n')
-		if _, err := file.Write(line); err != nil {
-			_ = file.Close()
-			return err
-		}
-		if err := file.Sync(); err != nil {
-			_ = file.Close()
-			return err
-		}
-		if err := file.Close(); err != nil {
-			return err
-		}
-		result.Position = uint64(len(scanned.Events))
-		scanned.Events = append(scanned.Events, event)
-		scanned.Canonical[key] = canonical
-		scanned.ByteOffset += int64(len(line))
-		indexRelationships(scanned, event)
 		return journal.writeCheckpoint(route, path, scanned)
 	})
-	return result, err
+	return results, err
 }
 
 // ReceivedAt is collector metadata and can legitimately change when the same

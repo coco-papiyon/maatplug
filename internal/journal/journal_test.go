@@ -2,6 +2,7 @@ package journal
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"sync"
 	"testing"
@@ -80,6 +81,42 @@ func TestAppendTreatsReceivedAtOnlyChangeAsRedelivery(t *testing.T) {
 	events, err := j.Read(route)
 	if err != nil || len(events) != 1 {
 		t.Fatalf("events=%d err=%v", len(events), err)
+	}
+}
+
+func TestAppendBatchPreservesOrderAndDetectsDuplicates(t *testing.T) {
+	j := New(t.TempDir())
+	route := Route{ProjectID: "project", Provider: "test", SessionID: "session", RunID: "run"}
+	events := []model.EventEnvelope{testEvent("event-1"), testEvent("event-2"), testEvent("event-3")}
+	results, err := j.AppendBatch(route, events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index, result := range results {
+		if result.Duplicate || result.Position != uint64(index) {
+			t.Fatalf("result %d = %+v", index, result)
+		}
+	}
+	redelivered := events[1]
+	redelivered.Time.ReceivedAt = redelivered.Time.ReceivedAt.Add(time.Minute)
+	results, err = j.AppendBatch(route, []model.EventEnvelope{redelivered, testEvent("event-4")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !results[0].Duplicate || results[0].Position != 1 || results[1].Duplicate || results[1].Position != 3 {
+		t.Fatalf("second batch results = %+v", results)
+	}
+	stored, err := j.Read(route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored) != 4 {
+		t.Fatalf("stored events = %d, want 4", len(stored))
+	}
+	for index, event := range stored {
+		if event.EventID.Value != fmt.Sprintf("event-%d", index+1) {
+			t.Fatalf("stored event %d = %s", index, event.EventID.Value)
+		}
 	}
 }
 

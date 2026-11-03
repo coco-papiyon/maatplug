@@ -58,21 +58,6 @@ func normalizeHTML(rawHTML string) string {
 	return strings.TrimSpace(spaceRe.ReplaceAllString(text, " "))
 }
 
-// uniqueOrderedMatches returns re's first capture group from every match in
-// s, deduplicated, keeping each value's first-seen order.
-func uniqueOrderedMatches(re *regexp.Regexp, s string) []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, m := range re.FindAllStringSubmatch(s, -1) {
-		v := m[1]
-		if !seen[v] {
-			seen[v] = true
-			out = append(out, v)
-		}
-	}
-	return out
-}
-
 // lastMatch returns the last (rightmost) match of re in s, or "" if none.
 func lastMatch(re *regexp.Regexp, s string) string {
 	matches := re.FindAllString(s, -1)

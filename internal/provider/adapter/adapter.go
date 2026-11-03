@@ -38,6 +38,8 @@ type Transcript struct {
 	NextByteOffset  int64
 	StartLine       uint64
 	NextLine        uint64
+	TotalBytes      int64
+	HasMore         bool
 	Rotated         bool
 	IncompleteTail  bool
 	Unavailable     string

@@ -176,7 +176,7 @@ maatplug config get/set            # （未実装）
 
 Webアプリ（`maatplug-web`）は現状、`maatplug serve`のラッパー経由ではなく`cmd/maatplug-web`として直接ビルド・実行する別バイナリになっている（`maatplug-web --addr 127.0.0.1:4173 --data-dir ...`）。詳細は9節。
 
-新形式の読み取りは`internal/query`パッケージとしてCLIとWebアプリ（どちらもGo）で共有する。プロジェクト一覧では検証済みcatalog、詳細ではRunジャーナル、期間集計ではsummaryを選び、投影の欠落・破損・遅れは正本から再構築する。これはGo内での実装共有であり、CLIとWebは互いにサブプロセスを起動しない。旧sessionファイルの互換表示も`internal/query`内へ閉じ込める。
+新形式の読み取りは`internal/query`パッケージとしてCLIとWebアプリ（どちらもGo）で共有する。プロジェクト一覧では検証済みcatalog、詳細ではRunジャーナル、期間集計ではsummaryを選び、投影の欠落・破損・遅れは正本から再構築する。これはGo内での実装共有であり、HTTPリクエストの処理としてWebがCLIのサブプロセスを起動することはない。旧sessionファイルの互換表示も`internal/query`内へ閉じ込める。（`maatplug-web`起動時に収集用の`maatplug collect --watch`を子プロセスとして立ち上げる点は9節を参照——これはリクエスト処理ではなくプロセスライフサイクルの都合であり、上記の原則と矛盾しない。）
 
 集計結果には、指示・トークン合計・diff合計に加えて`abandonedInstructions`（6.1節の並行resume由来で`abandoned:true`となった`turn_end`の件数）を必ず含める。`abandoned`な`turn_end`はトークン・diffの合計には加算しない（合計を「実測した結果ゼロだった」と誤読させないため）。`status`はこれを`(N unmeasured/abandoned)`という注記として、`report`のtable形式は`ABANDONED`列として、JSON形式は`abandonedInstructions`フィールドとして、いずれも0件でなければ必ず可視化する。
 
@@ -187,14 +187,17 @@ Webアプリ（`maatplug-web`）は現状、`maatplug serve`のラッパー経�
 - `net/http`の標準`ServeMux`（Go 1.22で追加されたメソッド・パスパラメータ構文、例: `mux.HandleFunc("GET /api/projects/{id}/sessions", ...)`）のみを使用し、外部routerライブラリへの依存を持たない。`go.mod`に追加の依存は無い。
 - フロントエンドは`internal/web/frontend/`（`index.html`／`app.js`／`style.css`）に置き、`internal/web`パッケージの`//go:embed frontend`で同梱する。`go:embed`は自パッケージ配下のディレクトリしか埋め込めないため、design当初案の`web/frontend/`という最上位配置ではなく、埋め込み元の`internal/web`パッケージ配下に置く形に変更した。
 - 既定は`127.0.0.1:4173`バインド・認証なし。`--addr`で変更可能。`--data-dir`で読み取り先のデータディレクトリを明示的に指定できる（省略時は`store.New()`と同じ解決規則）。
-- 読み取り専用・**自己完結**。`maatplug`本体プロセスやCLIの`report`コマンドを呼び出さず、HTTPリクエストごとに`internal/query`を利用する。catalogとsummaryはファイル上の再生成可能な投影であり、常駐インメモリindexを必要としない。
+- HTTPリクエスト処理は読み取り専用・**自己完結**。`maatplug`本体プロセスやCLIの`report`コマンドを呼び出さず、HTTPリクエストごとに`internal/query`を利用する。catalogとsummaryはファイル上の再生成可能な投影であり、常駐インメモリindexを必要としない。
+- 一方でプロセスとしての`maatplug-web`は、起動時に`maatplug collect --watch`を自分の子プロセス（`os/exec`、`cmd/maatplug-web/collector.go`）として立ち上げる。`go install`／`scripts/package.ps1`はどちらも`maatplug(.exe)`と`maatplug-web(.exe)`を同じディレクトリへ配置するため、自身の実行ファイルと同じディレクトリを最初に探し、無ければPATHへフォールバックして解決する。子プロセスの標準出力・標準エラーは`[collect] `という接頭辞を付けて自分のログへ中継し、1つのコンソール／ログにcollectorとWeb両方の状態が見えるようにする。子プロセスが（`--watch`の性質上、シグナルによる意図的な停止以外で）終了した場合は短い待機を挟んで自動的に再起動する——`collect --watch`はinboxのclaim/recoverプロトコルにより中断からの再開を前提に設計されているため、強制終了からの再起動は安全（8節）。`maatplug-web`自体がSIGINT/SIGTERMを受けたときはこの子プロセスも道連れに終了させる。この起動時の子プロセス管理は運用上の利便性のためであり、上記のHTTPリクエスト処理の自己完結性とは独立している。単一プロセスでの起動を望まない場合（収集を別ホストで管理している等）は`--no-collect`で無効化できる。
+- catalog（`internal/catalog`、`SchemaVersion 3`）はプロジェクト単位の集計に加え、**セッション単位の集計結果**（`Session.Derivations`：使用量・attribution・費用・operation・実費）と**日別のトークン数・費用内訳**（`PeriodSummary.EstimatedCost`等）も持つ。これにより`internal/query`の`Sessions()`（時間フィルタ無しの場合）と`Trend()`（provider絞り込み無しの場合）は生journalの再読込・再計算をせずcatalogから直接応答できる。重い計算は`collect`サイクル（`internal/collector`が呼ぶ`RebuildProject`）側に寄せ、Webリクエストの都度発生させない。時間・provider絞り込みが付いた場合は従来どおり生journalを読み直すライブ経路にフォールバックする。
 - 実装済みAPI
   - `GET /api/projects` — `internal/query.ListProjects`を設定済みデータ領域ごとに実行
   - `GET /api/projects/{id}/sessions` — `internal/query.Sessions`（Provider・セッション・Run・使用量・費用・操作・欠測）
   - `GET /api/projects/{id}/sessions/{provider}/{sessionId}` — `internal/query.SessionView`による新形式の共通詳細（存在しなければ404）
   - `GET /api/v1/projects/...`、`GET /api/collection-status` — 新形式のproject／work／期間／session／Run／entity詳細と収集診断
   - `GET /api/settings`、`POST /api/settings/areas`、`DELETE /api/settings/areas/{id}` — default data directory plus additional local, mounted, or network data areas. Removing an area removes only its dashboard registration, never the area contents.
-- 画面（すべて`app.js`のハッシュルーティングで実装、ビルドステップ無し）: プロジェクト一覧（`#/`） → セッション一覧（`#/project/:id`、Provider別） → セッション詳細（`#/project/:id/session/:provider/:sessionId`、指示ごとのカード表示：指示文／diff行数／トークン数、`abandoned`な指示には`unmeasured`バッジ）。clocのコード規模推移は、当初案のグラフ描画ではなく開始時／終了時の数値比較に簡略化した（Chart.js等の外部ライブラリを追加しない方針のため）。
+- 画面（すべて`app.js`のハッシュルーティングで実装、ビルドステップ無し）: プロジェクト一覧（`#/`） → セッション一覧（`#/project/:id`、Provider別） → セッション詳細（`#/project/:id/session/:provider/:sessionId`、指示ごとの行を持つ表形式、`abandoned`な指示には`unmeasured`バッジ）。clocのコード規模推移は、当初案のグラフ描画ではなく開始時／終了時の数値比較に簡略化した（Chart.js等の外部ライブラリを追加しない方針のため）。
+  - 指示の一覧は`instructions-table`（プロジェクト・セッション一覧と同じ表形式）で、1指示1行として時刻・指示文プレビュー・トークンのIN／OUT／cache read／cache write内訳（`internal/query/instruction_stats.go`の`InstructionTokens`。`reconcile.Decision`を`attribution.Result`の指示との対応付けで指示単位にグルーピングし、複数指示で共有される稀なケースは`complete:false`で明示する）・その指示に紐づく操作から集計した「コマンド実行数／編集ファイル数／diff行数」（`InstructionActivity`）を表示する。指示文の全文と、紐づく操作の個々のコマンド・対象ファイルなど生データは、行クリックで開く`<dialog>`ポップアップ内でのみ表示する（表側には要約のみを置き、生データは別画面遷移ではなくポップアップからのみ辿れるようにする設計）。
 
 ## 10. VSCode拡張設計
 

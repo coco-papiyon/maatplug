@@ -112,12 +112,16 @@ func Build(events []model.EventEnvelope) (Result, error) {
 	// A delta is preferred to run/thread cumulative counters in the same
 	// scope. If no delta exists, only the latest comparable cumulative value
 	// is used as a fallback total.
+	deltaTotals := map[string]int64{}
 	deltaScopes := map[string]bool{}
-	for key, item := range active {
+	for _, item := range active {
 		if result.Decisions[item.decision].Role == RoleCounted && item.payload.Counter.Kind == model.CounterDelta {
-			deltaScopes[scopeGroup(item.event.Scope)] = true
+			scope := scopeGroup(item.event.Scope)
+			deltaScopes[scope] = true
+			if item.tokens != nil {
+				deltaTotals[scope] += *item.tokens
+			}
 		}
-		_ = key
 	}
 	cumulative := map[string][]*observation{}
 	for _, item := range active {
@@ -125,7 +129,32 @@ func Build(events []model.EventEnvelope) (Result, error) {
 		if item.payload.Counter.Kind == model.CounterDelta {
 			continue
 		}
-		if deltaScopes[scopeGroup(item.event.Scope)] {
+		scope := scopeGroup(item.event.Scope)
+		if deltaScopes[scope] {
+			// A cumulative whose own target *is* this scope (e.g. Codex's
+			// turn-level running total, AppliesTo the run itself) is an
+			// implicit "this totals everything in this run" claim, the same
+			// shape as the explicit parent/child containment handled below —
+			// so any part of it not already covered by this scope's counted
+			// deltas (e.g. a sibling response whose own usage never
+			// normalized into its own delta) is preserved as a residual
+			// instead of discarded outright. A cumulative targeting
+			// something broader than this one scope (e.g. a thread/session
+			// total spanning many runs) can't be safely reconciled against
+			// just this scope's deltas, so it keeps the original blanket
+			// exclusion — crediting a session-wide residual here would
+			// double-count it against every other run in that session.
+			if entityKey(item.payload.AppliesTo) == scope && item.tokens != nil {
+				if covered := deltaTotals[scope]; *item.tokens > covered {
+					residual := *item.tokens - covered
+					decision.Role, decision.Reason = RoleExplanatory, "run-scope cumulative total exceeds the sum of this scope's counted deltas; remainder credited as a residual"
+					result.Undecomposed += residual
+					result.Residuals = append(result.Residuals, Residual{ParentUsage: item.payload.Usage, Tokens: residual, Reason: "run-scope cumulative total exceeds the sum of its counted deltas"})
+					continue
+				}
+				decision.Role, decision.Reason = RoleExcluded, "fully covered by counted deltas in the same run scope"
+				continue
+			}
 			decision.Role, decision.Reason = RoleExcluded, "a non-cumulative detail is available in the same run scope"
 			continue
 		}
@@ -135,13 +164,30 @@ func Build(events []model.EventEnvelope) (Result, error) {
 	for _, key := range sortedKeys(cumulative) {
 		items := cumulative[key]
 		sort.SliceStable(items, func(i, j int) bool { return eventNewer(items[i].event, items[j].event) })
+		// The newest comparable cumulative value wins if it has a usable
+		// normalized total; if it doesn't (e.g. a provider format hiccup on
+		// just the latest one), fall back to the newest *older* candidate
+		// that does, rather than discarding the whole target's running
+		// total for the sake of the single freshest-but-unparseable point.
+		chosen := -1
+		for index, item := range items {
+			if item.tokens != nil {
+				chosen = index
+				break
+			}
+		}
 		for index, item := range items {
 			decision := &result.Decisions[item.decision]
-			if index == 0 && decision.Role != RoleConflict && item.tokens != nil {
-				decision.Role, decision.Reason = RoleCounted, "latest comparable cumulative value used because no delta detail is available"
-			} else if index == 0 && item.tokens == nil {
+			switch {
+			case chosen == -1:
 				decision.Role, decision.Reason = RoleExcluded, "cumulative value has no normalized total and cannot establish a baseline"
-			} else {
+			case index == chosen && index == 0:
+				decision.Role, decision.Reason = RoleCounted, "latest comparable cumulative value used because no delta detail is available"
+			case index == chosen:
+				decision.Role, decision.Reason = RoleCounted, "latest comparable cumulative value with a usable normalized total used because no delta detail is available; newer value(s) for the same target could not be normalized"
+			case index < chosen:
+				decision.Role, decision.Reason = RoleExcluded, "newer cumulative value in the same target and generation could not be normalized; an older comparable value was used instead"
+			default:
 				decision.Role, decision.Reason = RoleExcluded, "older cumulative value in the same target and generation"
 			}
 		}

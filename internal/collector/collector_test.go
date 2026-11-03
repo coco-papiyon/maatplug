@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -59,6 +60,42 @@ type testMaintenanceJob struct{ calls int }
 func (job *testMaintenanceJob) RunDue(context.Context) (bool, error) {
 	job.calls++
 	return true, nil
+}
+
+type retryingMaintenanceJob struct {
+	calls  int
+	cancel context.CancelFunc
+	err    error
+}
+
+func (job *retryingMaintenanceJob) RunDue(context.Context) (bool, error) {
+	job.calls++
+	if job.calls == 1 {
+		return true, job.err
+	}
+	job.cancel()
+	return false, nil
+}
+
+func TestWatchReportsCycleErrorAndRetriesUntilCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cycleErr := errors.New("temporary catalog lock contention")
+	job := &retryingMaintenanceJob{cancel: cancel, err: cycleErr}
+	worker := New(t.TempDir())
+	worker.Jobs = []MaintenanceJob{job}
+	var reported []error
+	worker.OnError = func(err error) { reported = append(reported, err) }
+
+	err := worker.Watch(ctx, time.Millisecond, nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Watch() error = %v, want context cancellation", err)
+	}
+	if job.calls != 2 {
+		t.Fatalf("maintenance calls = %d, want 2", job.calls)
+	}
+	if len(reported) != 1 || !errors.Is(reported[0], cycleErr) {
+		t.Fatalf("reported errors = %v, want [%v]", reported, cycleErr)
+	}
 }
 
 func TestRunOnceRebuildsProjectCatalogsAfterMaintenance(t *testing.T) {

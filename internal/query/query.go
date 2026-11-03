@@ -135,10 +135,22 @@ type Detail struct {
 	ActualSpend        billing.Summary           `json:"actualSpend"`
 	ActualSpendRecords []billing.Record          `json:"actualSpendRecords"`
 	Operations         operation.Result          `json:"operations"`
+	Instructions       []InstructionView         `json:"instructions"`
 	Missing            []model.FieldAvailability `json:"missing"`
 	PricingEvidence    []PricingEvidence         `json:"pricingEvidence"`
 	Events             []model.EventEnvelope     `json:"events,omitempty"`
 	Source             string                    `json:"source"`
+	// TokensInput/Output/CacheRead/CacheCreation and TokenBreakdownComplete
+	// are Usage.KnownSubtotal's IN/OUT/cache-read/cache-write split — the
+	// same classifyNormalized/tokenBreakdown basis ProjectSummary/
+	// SessionSummary already show for the project/session list rows — so
+	// the session detail screen's "Known tokens" stat can show the same
+	// breakdown instead of just the bare total.
+	TokensInput            int64 `json:"tokensInput"`
+	TokensOutput           int64 `json:"tokensOutput"`
+	TokensCacheRead        int64 `json:"tokensCacheRead"`
+	TokensCacheCreation    int64 `json:"tokensCacheCreation"`
+	TokenBreakdownComplete bool  `json:"tokenBreakdownComplete"`
 }
 
 type PricingEvidence struct {
@@ -280,11 +292,19 @@ func (service *Service) Sessions(projectID string, filter Filter) ([]SessionSumm
 		if filter.Provider != "" && session.Provider != filter.Provider {
 			continue
 		}
+		if filter.Since.IsZero() && filter.Until.IsZero() {
+			// No time window: the catalog's cached per-session aggregate
+			// (computed once at collect time, see catalog.buildSessionDerived)
+			// already answers this exactly, without re-reading raw journal
+			// events or re-running reconcile/attribution/cost/operation.
+			result = append(result, sessionSummaryFromCatalog(session))
+			continue
+		}
 		events, runs, err := service.sessionEvents(projectID, session.Provider, session.SessionID, filter)
 		if err != nil {
 			return nil, err
 		}
-		if len(events) == 0 && (!filter.Since.IsZero() || !filter.Until.IsZero()) {
+		if len(events) == 0 {
 			continue
 		}
 		detail, err := service.derive(projectID, session.Provider, session.SessionID, "", events, "journal")
@@ -295,6 +315,35 @@ func (service *Service) Sessions(projectID string, filter Filter) ([]SessionSumm
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].StartedAt.After(result[j].StartedAt) })
 	return result, nil
+}
+
+func sessionSummaryFromCatalog(session catalog.Session) SessionSummary {
+	var instructions, calls, artifacts uint64
+	var start, end time.Time
+	for _, run := range session.Runs {
+		instructions += run.InstructionCount
+		calls += run.ModelCallCount
+		artifacts += run.ArtifactCount
+		if !run.FirstReceivedAt.IsZero() && (start.IsZero() || run.FirstReceivedAt.Before(start)) {
+			start = run.FirstReceivedAt
+		}
+		if run.LastReceivedAt.After(end) {
+			end = run.LastReceivedAt
+		}
+	}
+	derived := session.Derivations
+	buckets, complete := tokenBreakdown(derived.Usage)
+	return SessionSummary{
+		Provider: session.Provider, SessionID: session.SessionID, StartedAt: start,
+		Instructions: int(instructions), TotalTokens: derived.Usage.KnownSubtotal,
+		TokensInput: buckets.input, TokensOutput: buckets.output, TokensCacheRead: buckets.cacheRead, TokensCacheCreation: buckets.cacheWrite,
+		TokenBreakdownComplete: complete, Changes: changeSummary(derived.Operations),
+		CostUnpricedInstructions: incompleteCosts(derived.Cost), Runs: len(session.Runs), EndedAt: end,
+		Calls: int(calls), Usage: usageView(derived.Usage, derived.Attribution),
+		EstimatedCost: derived.Cost.KnownTotals, CostMissing: derived.Cost.MissingCost,
+		Operations: len(derived.Operations.Operations), Artifacts: int(artifacts),
+		Unresolved: len(derived.Missing), RunSummaries: session.Runs,
+	}
 }
 
 func (service *Service) ProjectDetail(projectID string, filter Filter) (Detail, error) {
@@ -501,15 +550,15 @@ func (service *Service) catalogFresh(projection catalog.ProjectCatalog) bool {
 			return false
 		}
 	}
+	// Run summaries are already embedded verbatim in projection.Sessions
+	// (writeProjection wrote both from the same in-memory value), so there
+	// is nothing to gain from reading each one back and comparing fields —
+	// only an existence check is needed, to catch a file deleted or moved
+	// out from under the catalog (see TestCatalogRepairAndJournalDetails).
 	builder := catalog.New(service.Root)
 	for _, session := range projection.Sessions {
 		for _, run := range session.Runs {
-			data, err := os.ReadFile(builder.RunSummaryPath(projection.ProjectID, session.Provider, session.SessionID, run.RunID))
-			if err != nil {
-				return false
-			}
-			var saved catalog.RunSummary
-			if json.Unmarshal(data, &saved) != nil || saved.SchemaVersion != catalog.SchemaVersion || saved.ProjectID != projection.ProjectID || saved.Provider != session.Provider || saved.SessionID != session.SessionID || saved.RunID != run.RunID {
+			if _, err := os.Stat(builder.RunSummaryPath(projection.ProjectID, session.Provider, session.SessionID, run.RunID)); err != nil {
 				return false
 			}
 		}
@@ -550,6 +599,11 @@ func (service *Service) derive(projectID, provider, sessionID, runID string, eve
 	if err != nil {
 		return Detail{}, err
 	}
+	instructions, err := buildInstructions(service.Root, events)
+	if err != nil {
+		return Detail{}, err
+	}
+	instructions = attachInstructionStats(instructions, usageResult, attr, ops)
 	records, err := (billing.Store{Root: service.Root}).List()
 	if err != nil {
 		return Detail{}, err
@@ -559,10 +613,12 @@ func (service *Service) derive(projectID, provider, sessionID, runID string, eve
 	if err != nil {
 		return Detail{}, err
 	}
-	detail := Detail{ProjectID: projectID, Provider: provider, SessionID: sessionID, RunID: runID, Usage: usageResult, InputComposition: inputResult, Attribution: attr, EstimatedCost: costResult, ActualSpend: spend, ActualSpendRecords: records, Operations: ops, Events: events, Source: source}
+	detail := Detail{ProjectID: projectID, Provider: provider, SessionID: sessionID, RunID: runID, Usage: usageResult, InputComposition: inputResult, Attribution: attr, EstimatedCost: costResult, ActualSpend: spend, ActualSpendRecords: records, Operations: ops, Instructions: instructions, Events: events, Source: source}
 	detail.Period = periodFor(events)
 	detail.Missing = collectMissing(events, ops, costResult, attr)
 	detail.PricingEvidence = []PricingEvidence{{PricingVersion: costResult.PricingVersion, RateIDs: rateIDs(costResult), Missing: costResult.MissingCost}}
+	buckets, complete := tokenBreakdown(usageResult)
+	detail.TokensInput, detail.TokensOutput, detail.TokensCacheRead, detail.TokensCacheCreation, detail.TokenBreakdownComplete = buckets.input, buckets.output, buckets.cacheRead, buckets.cacheWrite, complete
 	return detail, nil
 }
 
@@ -845,6 +901,66 @@ func catalogCounts(c catalog.ProjectCatalog) (int, int, int) {
 
 type tokenBucketTotals struct{ input, output, cacheRead, cacheWrite int64 }
 
+func (t tokenBucketTotals) total() int64 { return t.input + t.output + t.cacheRead + t.cacheWrite }
+
+func (t *tokenBucketTotals) add(other tokenBucketTotals) {
+	t.input += other.input
+	t.output += other.output
+	t.cacheRead += other.cacheRead
+	t.cacheWrite += other.cacheWrite
+}
+
+// scaled prorates every bucket by units/totalUnits, for the rare case where a
+// single usage decision is split across several instructions (a correction
+// policy's explicit allocation, or the concurrent-resume edge case
+// docs/design.md section 12 point 9 describes). Integer division floors each
+// bucket independently, so scaled buckets across all recipients of one
+// decision can undercount the source decision by a few tokens — acceptable
+// here since this only runs for already-approximate, explicitly-flagged
+// splits, never for the common single-instruction case.
+func (t tokenBucketTotals) scaled(units, totalUnits int64) tokenBucketTotals {
+	if totalUnits <= 0 {
+		return tokenBucketTotals{}
+	}
+	return tokenBucketTotals{
+		input:      t.input * units / totalUnits,
+		output:     t.output * units / totalUnits,
+		cacheRead:  t.cacheRead * units / totalUnits,
+		cacheWrite: t.cacheWrite * units / totalUnits,
+	}
+}
+
+// classifyNormalized buckets one usage decision's normalized token counts
+// into the input/output/cache-read/cache-write categories the dashboard
+// shows, shared by both the session-wide breakdown (tokenBreakdown) and the
+// per-instruction breakdown (instructionTokenBreakdowns).
+func classifyNormalized(normalized *model.NormalizedUsage) (tokenBucketTotals, bool) {
+	var out tokenBucketTotals
+	if normalized == nil {
+		return out, false
+	}
+	complete := true
+	for _, bucket := range normalized.ExclusiveBuckets {
+		if bucket.Tokens.Value == nil {
+			complete = false
+			continue
+		}
+		switch bucket.Name {
+		case "input", "input_uncached":
+			out.input += *bucket.Tokens.Value
+		case "output":
+			out.output += *bucket.Tokens.Value
+		case "cache_read_input":
+			out.cacheRead += *bucket.Tokens.Value
+		case "cache_write_input":
+			out.cacheWrite += *bucket.Tokens.Value
+		default:
+			complete = false
+		}
+	}
+	return out, complete
+}
+
 func tokenBreakdown(result reconcile.Result) (tokenBucketTotals, bool) {
 	var out tokenBucketTotals
 	complete := !result.Unknown
@@ -852,28 +968,11 @@ func tokenBreakdown(result reconcile.Result) (tokenBucketTotals, bool) {
 		if decision.Role != reconcile.RoleCounted {
 			continue
 		}
-		if decision.Normalized == nil {
+		buckets, ok := classifyNormalized(decision.Normalized)
+		if !ok {
 			complete = false
-			continue
 		}
-		for _, bucket := range decision.Normalized.ExclusiveBuckets {
-			if bucket.Tokens.Value == nil {
-				complete = false
-				continue
-			}
-			switch bucket.Name {
-			case "input", "input_uncached":
-				out.input += *bucket.Tokens.Value
-			case "output":
-				out.output += *bucket.Tokens.Value
-			case "cache_read_input":
-				out.cacheRead += *bucket.Tokens.Value
-			case "cache_write_input":
-				out.cacheWrite += *bucket.Tokens.Value
-			default:
-				complete = false
-			}
-		}
+		out.add(buckets)
 	}
 	return out, complete
 }

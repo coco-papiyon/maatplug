@@ -56,13 +56,21 @@ func TestBuildCanCompareHistoricalUsageAtCurrentConditions(t *testing.T) {
 	currentAt := usedAt.Add(24 * time.Hour)
 	events := []model.EventEnvelope{modelCall("call", "model", usedAt)}
 	usage := reconcile.Result{Decisions: []reconcile.Decision{usageDecision("usage", "call", usedAt, 1_000_000)}}
-	version := costVersion("current", "4", currentAt)
+	// An actual price change (old rate closed out when new took over at
+	// currentAt) — not just "no earlier rate exists yet" (see
+	// TestBuild_FallsBackToEarliestRateForUsageOlderThanAnyPricingHistory
+	// for that case), so this only exercises the deliberate as-then vs.
+	// as-now comparison the PricingAt override is for.
+	version := pricing.Version{SchemaVersion: pricing.VersionSchema, Version: "v1", CreatedAt: currentAt, Reason: "test", Sources: []pricing.SourceDocument{{ID: "source", Kind: "manual", RetrievedAt: currentAt}}, Rates: []pricing.Rate{
+		{ID: "old-rate", Provider: "codex", ModelPattern: "model", UsageClass: "input_uncached", Currency: "USD", Amount: "2", UnitScale: 1_000_000, EffectiveFrom: usedAt.Add(-time.Hour), EffectiveTo: &currentAt, SourceID: "source"},
+		{ID: "new-rate", Provider: "codex", ModelPattern: "model", UsageClass: "input_uncached", Currency: "USD", Amount: "4", UnitScale: 1_000_000, EffectiveFrom: currentAt, SourceID: "source"},
+	}}
 	withoutOverride, err := Build(events, usage, &version)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if withoutOverride.Records[0].Amount != nil {
-		t.Fatalf("future rate applied to historical usage: %+v", withoutOverride)
+	if withoutOverride.Records[0].Amount == nil || *withoutOverride.Records[0].Amount != "2" {
+		t.Fatalf("historical calculation should use the rate that actually covered usedAt: %+v", withoutOverride)
 	}
 	withOverride, err := BuildWithOptions(events, usage, &version, Options{PricingAt: &currentAt})
 	if err != nil || withOverride.Records[0].Amount == nil || *withOverride.Records[0].Amount != "4" {
@@ -70,6 +78,26 @@ func TestBuildCanCompareHistoricalUsageAtCurrentConditions(t *testing.T) {
 	}
 	if withoutOverride.CalculationID == withOverride.CalculationID {
 		t.Fatal("historical and current-condition calculations share an ID")
+	}
+}
+
+func TestBuild_FallsBackToEarliestRateForUsageOlderThanAnyPricingHistory(t *testing.T) {
+	// Usage from before maatplug ever fetched a price for this model (e.g.
+	// right after the data directory was reset and pricing was fetched for
+	// the first time) has no earlier rate to apply — Build falls back to
+	// the earliest one on record (see pricing.earliestApplicable) instead
+	// of leaving it permanently unpriced.
+	firstFetch := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	usedAt := firstFetch.Add(-48 * time.Hour)
+	events := []model.EventEnvelope{modelCall("call", "model", usedAt)}
+	usage := reconcile.Result{Decisions: []reconcile.Decision{usageDecision("usage", "call", usedAt, 1_000_000)}}
+	version := costVersion("v1", "4", firstFetch.Add(time.Hour))
+	result, err := Build(events, usage, &version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Records[0].Status != "calculated" || result.Records[0].Amount == nil || *result.Records[0].Amount != "4" {
+		t.Fatalf("result = %+v, want the earliest rate applied to pre-history usage", result)
 	}
 }
 

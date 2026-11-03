@@ -63,13 +63,13 @@ session IDとRun IDはbase64urlでパス要素に変換する。project IDとpro
 ## コマンド
 
 ```text
-maatplug collect --once
-maatplug collect --watch [--interval 1s]
+maatplug collect --once [--heartbeat 30s]
+maatplug collect --watch [--interval 1s] [--heartbeat 30s]
 maatplug rebuild-catalog [--project <id>]
 maatplug doctor collection [--json] [--record-baseline]
 ```
 
-`collect --once`は実行時点で処理可能なrecordを取り込む。再試行待ちのrecordはinboxに残る。`collect --watch`は停止シグナルまで同じ処理を繰り返す。`rebuild-catalog`は正本から投影を作り直す。`doctor collection`は未処理数、処理中、隔離、受付エラー、破損ジャーナル、内容参照、catalogの欠落・遅れを表示する。
+`collect --once`は実行時点で処理可能なrecordを取り込む。再試行待ちのrecordはinboxに残る。`collect --once`と`collect --watch`は起動時と既定30秒間隔でワーカー状態とinbox件数を表示する。`collect --watch`は停止シグナルまで処理を繰り返し、ロック競合や一時的なI/O障害で周期が失敗してもエラーを表示して`--interval`後に再試行する。`--heartbeat 0`で定期表示を無効にできる。大きなtranscriptは500行または4 MiBごとにジャーナルとカーソルを確定し、確定位置を進捗として表示する。処理が中断した場合は、最後に確定したチャンクの次から再開する。`rebuild-catalog`は正本から投影を作り直す。`doctor collection`は未処理数、処理中、隔離、受付エラー、破損ジャーナル、内容参照、catalogの欠落・遅れを表示する。
 
 Phase 3では、collectorがprovider hookをデコードしてraw payloadと意味イベントを保存し、Stopを境界にProvider固有transcriptを差分解析する。transcriptのbyte offset、行番号、世代、正規化済みProvider IDは`state/provider-cursors`へ保存する。詳細は[provider-adapter-phase3.md](provider-adapter-phase3.md)を参照する。
 

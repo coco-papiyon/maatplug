@@ -40,6 +40,7 @@ type Operation struct {
 	RequestedAt      time.Time                 `json:"requestedAt"`
 	FinalStatus      string                    `json:"finalStatus"`
 	ExitCode         *int                      `json:"exitCode,omitempty"`
+	CommandText      string                    `json:"commandText,omitempty"`
 	Async            bool                      `json:"async,omitempty"`
 	Environment      Environment               `json:"environment"`
 	Risk             RiskAssessment            `json:"risk"`
@@ -658,7 +659,11 @@ func inspectCommand(op *Operation, args []string, eventID model.NamespacedID) {
 		}
 	}
 	if len(args) > 0 {
-		assessCommand(op, strings.Join(args, " "), eventID)
+		joined := strings.Join(args, " ")
+		if op.CommandText == "" {
+			op.CommandText = joined
+		}
+		assessCommand(op, joined, eventID)
 		if name := validationCommand(strings.Join(args, " ")); name != "" {
 			op.Validations = append(op.Validations, Validation{Name: name, Status: "requested", Availability: model.AvailabilityInferred, RequestEvent: eventID})
 		}
@@ -670,6 +675,9 @@ func inspectCommand(op *Operation, args []string, eventID model.NamespacedID) {
 }
 
 func inspectCommandText(op *Operation, command string, eventID model.NamespacedID) {
+	if op.CommandText == "" {
+		op.CommandText = command
+	}
 	assessCommand(op, command, eventID)
 	if name := validationCommand(command); name != "" && !hasValidation(op.Validations, name) {
 		op.Validations = append(op.Validations, Validation{Name: name, Status: "requested", Availability: model.AvailabilityInferred, RequestEvent: eventID})

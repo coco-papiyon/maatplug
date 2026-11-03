@@ -51,10 +51,26 @@ func RatesFromModels(models []ModelPricing, sourceID string, effectiveFrom time.
 			if class.amount <= 0 {
 				continue
 			}
+			amount := strconv.FormatFloat(class.amount, 'f', -1, 64)
 			result = append(result, Rate{
 				ID: rateID(item.Provider, item.Model, class.name, sourceID, effectiveFrom), Provider: item.Provider,
-				Service: "api", ModelPattern: item.Model, UsageClass: class.name,
-				Currency: "USD", Amount: strconv.FormatFloat(class.amount, 'f', -1, 64), UnitScale: 1_000_000,
+				Service: ServiceAPI, ModelPattern: item.Model, UsageClass: class.name,
+				Currency: "USD", Amount: amount, UnitScale: 1_000_000,
+				EffectiveFrom: effectiveFrom, SourceID: sourceID,
+			})
+			// The scraped page only ever names a model's short, undated alias
+			// (e.g. "claude-haiku-4-5"), but a provider's own recorded model
+			// call sometimes carries a dated snapshot id for that same model
+			// instead (e.g. "claude-haiku-4-5-20251001", observed live —
+			// Anthropic's public API snapshot-naming convention). A second
+			// rate whose pattern requires exactly an 8-digit date suffix
+			// (never a bare "*", which could also swallow an unrelated higher
+			// version number like "-4-10") keeps that usage priced without
+			// letting a different model's short alias match by accident.
+			result = append(result, Rate{
+				ID: rateID(item.Provider, item.Model+"-dated", class.name, sourceID, effectiveFrom), Provider: item.Provider,
+				Service: ServiceAPI, ModelPattern: item.Model + "-????????", UsageClass: class.name,
+				Currency: "USD", Amount: amount, UnitScale: 1_000_000,
 				EffectiveFrom: effectiveFrom, SourceID: sourceID,
 			})
 		}

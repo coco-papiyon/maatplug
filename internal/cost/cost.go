@@ -82,8 +82,16 @@ type callInfo struct {
 	at       time.Time
 }
 
+// Build is BuildWithOptions with the default conditions the everyday
+// dashboard/report/catalog cost path uses: pricing.ServiceAPI, since that is
+// the only service tier the automatic public-pricing refresh
+// (pricing.RatesFromModels) ever produces, and every fetched rate requires a
+// matching Service to resolve (see Version.Resolve) — without this default,
+// no usage would ever price against auto-fetched rates. Callers that need to
+// audit a specific service/contract condition (the `maatplug pricing`
+// diagnostic subcommands) should call BuildWithOptions directly instead.
 func Build(events []model.EventEnvelope, usage reconcile.Result, version *pricing.Version) (Result, error) {
-	return BuildWithOptions(events, usage, version, Options{})
+	return BuildWithOptions(events, usage, version, Options{Service: pricing.ServiceAPI})
 }
 
 func BuildWithOptions(events []model.EventEnvelope, usage reconcile.Result, version *pricing.Version, options Options) (Result, error) {

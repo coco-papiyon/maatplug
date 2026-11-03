@@ -123,6 +123,14 @@ maatplug report --format json
 
 ## Webダッシュボードの起動
 
+Windowsでは、リポジトリ直下の`start.bat`を実行すると`go install`後にWebダッシュボードを起動する。
+
+```powershell
+.\start.bat
+```
+
+Webは <http://127.0.0.1:4173> で待ち受ける。`start.bat`は新しいウィンドウを開かず、そのまま同じコンソールで`maatplug-web`をフォアグラウンド実行する。`maatplug-web`は起動時に`maatplug collect --watch`を自分の子プロセスとして起動し、その出力を`[collect] `プレフィックス付きで自分のログへ流し込む（1ウィンドウで両方の状態が見える）。子プロセスが異常終了した場合は自動的に再起動を試みる。Ctrl+Cで（またはウィンドウを閉じると）子の収集処理も含めて停止する。収集を別ホスト等で自前管理していて`maatplug-web`に起動させたくない場合は`--no-collect`を付ける。
+
 ビルドせずに起動する場合:
 
 ```sh

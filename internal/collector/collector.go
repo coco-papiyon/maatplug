@@ -33,6 +33,8 @@ type Collector struct {
 	MaxAttempts int
 	RetryDelay  time.Duration
 	Jobs        []MaintenanceJob
+	OnProgress  func(TranscriptProgress)
+	OnError     func(error)
 }
 
 type MaintenanceJob interface {
@@ -57,6 +59,14 @@ type Stats struct {
 	Catalogs    int `json:"catalogs"`
 	JobsRun     int `json:"jobsRun"`
 	JobsFailed  int `json:"jobsFailed"`
+}
+
+type TranscriptProgress struct {
+	Provider       string
+	ProcessedBytes int64
+	TotalBytes     int64
+	ProcessedLines uint64
+	HasMore        bool
 }
 
 // RunOnce recovers abandoned work, drains every ready record, and rebuilds
@@ -269,24 +279,37 @@ func (worker *Collector) processProviderHook(record ingest.Record) (string, bool
 
 	process := func() (bool, error) {
 		if record.Hook.Event == "Stop" {
-			chunk, err := worker.readTranscript(record.Route.Provider, hook.TranscriptPath)
-			if err != nil {
-				return false, err
+			allDuplicates := true
+			firstChunk := true
+			for {
+				chunk, err := worker.readTranscript(record.Route.Provider, hook.TranscriptPath)
+				if err != nil {
+					return false, err
+				}
+				transcriptBatch, err := worker.normalizeTranscript(record.Route.Provider, projectID, record.ReceiptID, record.ReceivedAt, hook, chunk)
+				if err != nil {
+					return false, err
+				}
+				if firstChunk {
+					transcriptBatch.Events = append(batch.Events, transcriptBatch.Events...)
+					transcriptBatch.Contents = append(batch.Contents, transcriptBatch.Contents...)
+				}
+				duplicate, err := worker.persistBatch(route, transcriptBatch)
+				if err != nil {
+					return false, err
+				}
+				allDuplicates = allDuplicates && duplicate
+				if err := worker.saveTranscriptCursor(record.Route.Provider, chunk, transcriptBatch.SeenIDs); err != nil {
+					return false, err
+				}
+				if worker.OnProgress != nil {
+					worker.OnProgress(TranscriptProgress{Provider: record.Route.Provider, ProcessedBytes: chunk.NextByteOffset, TotalBytes: chunk.TotalBytes, ProcessedLines: chunk.NextLine, HasMore: chunk.HasMore})
+				}
+				if !chunk.HasMore {
+					return allDuplicates, nil
+				}
+				firstChunk = false
 			}
-			transcriptBatch, err := worker.normalizeTranscript(record.Route.Provider, projectID, record.ReceiptID, record.ReceivedAt, hook, chunk)
-			if err != nil {
-				return false, err
-			}
-			batch.Events = append(batch.Events, transcriptBatch.Events...)
-			batch.Contents = append(batch.Contents, transcriptBatch.Contents...)
-			duplicate, err := worker.persistBatch(route, batch)
-			if err != nil {
-				return false, err
-			}
-			if err := worker.saveTranscriptCursor(record.Route.Provider, chunk, transcriptBatch.SeenIDs); err != nil {
-				return false, err
-			}
-			return duplicate, nil
 		}
 		return worker.persistBatch(route, batch)
 	}
@@ -332,6 +355,12 @@ func (worker *Collector) persistBatch(fallback journal.Route, batch provideradap
 		}
 	}
 	allDuplicates := len(batch.Events) > 0
+	type streamBatch struct {
+		route  journal.Route
+		events []model.EventEnvelope
+	}
+	streams := make([]streamBatch, 0)
+	streamIndex := map[journal.Route]int{}
 	for _, event := range batch.Events {
 		refs, err := model.ContentReferences(event)
 		if err != nil {
@@ -343,11 +372,22 @@ func (worker *Collector) persistBatch(fallback journal.Route, batch provideradap
 			}
 		}
 		route := routeForEvent(fallback, event)
-		result, err := worker.Journal.Append(route, event)
+		index, found := streamIndex[route]
+		if !found {
+			index = len(streams)
+			streamIndex[route] = index
+			streams = append(streams, streamBatch{route: route})
+		}
+		streams[index].events = append(streams[index].events, event)
+	}
+	for _, stream := range streams {
+		results, err := worker.Journal.AppendBatch(stream.route, stream.events)
 		if err != nil {
 			return false, err
 		}
-		allDuplicates = allDuplicates && result.Duplicate
+		for _, result := range results {
+			allDuplicates = allDuplicates && result.Duplicate
+		}
 	}
 	return allDuplicates, nil
 }
@@ -374,7 +414,9 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// Watch repeats collection until the caller cancels the context.
+// Watch repeats collection until the caller cancels the context. A failed
+// cycle is reported through OnError and retried after interval; watch mode is
+// intended to survive transient lock contention and I/O failures.
 func (worker *Collector) Watch(ctx context.Context, interval time.Duration, onCycle func(Stats)) error {
 	if interval <= 0 {
 		interval = time.Second
@@ -384,8 +426,13 @@ func (worker *Collector) Watch(ctx context.Context, interval time.Duration, onCy
 		if onCycle != nil {
 			onCycle(stats)
 		}
-		if err != nil && !errors.Is(err, context.Canceled) {
-			return err
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return err
+			}
+			if worker.OnError != nil {
+				worker.OnError(err)
+			}
 		}
 		timer := time.NewTimer(interval)
 		select {
