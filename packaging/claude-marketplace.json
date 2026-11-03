@@ -1,0 +1,8 @@
+{
+  "name": "maatplug-claude-local",
+  "description": "Local Windows distribution of the maatplug Claude Code plugin.",
+  "owner": { "name": "coco-papiyon" },
+  "plugins": [
+    { "name": "maatplug", "source": "./plugins/maatplug-claude" }
+  ]
+}

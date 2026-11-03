@@ -115,6 +115,7 @@ type SessionSummary struct {
 }
 
 type ChangeSummary struct {
+	NoEdits      bool                     `json:"noEdits,omitempty"`
 	Added        *int                     `json:"added,omitempty"`
 	Removed      *int                     `json:"removed,omitempty"`
 	FilesChanged *int                     `json:"filesChanged,omitempty"`
@@ -532,6 +533,9 @@ func (service *Service) catalog(projectID string) (catalog.ProjectCatalog, error
 }
 
 func (service *Service) catalogFresh(projection catalog.ProjectCatalog) bool {
+	if projection.AggregationVersion != catalog.AggregationVersion {
+		return false
+	}
 	paths, err := journal.New(service.Root).ListProjectStreams(projection.ProjectID)
 	if err != nil || len(paths) != len(projection.Inputs) {
 		return false
@@ -604,6 +608,9 @@ func (service *Service) derive(projectID, provider, sessionID, runID string, eve
 		return Detail{}, err
 	}
 	instructions = attachInstructionStats(instructions, usageResult, attr, ops)
+	instructions = attachInstructionCosts(instructions, attr, costResult)
+	instructions = attachInstructionAnswers(service.Root, instructions, events)
+	instructions = markInstructionsWithoutEdits(instructions, ops, events)
 	records, err := (billing.Store{Root: service.Root}).List()
 	if err != nil {
 		return Detail{}, err
@@ -1011,6 +1018,7 @@ func changeSummary(result operation.Result) ChangeSummary {
 		return ChangeSummary{Availability: model.AvailabilityUnknown, Reason: "no measured artifact diff was collected"}
 	}
 	resultSummary := ChangeSummary{Availability: model.AvailabilityObserved}
+	resultSummary.NoEdits = addedObserved && removedObserved && filesObserved && added == 0 && removed == 0 && files == 0
 	if addedObserved {
 		resultSummary.Added = &added
 	}

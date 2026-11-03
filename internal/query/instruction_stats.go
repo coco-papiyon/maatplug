@@ -4,6 +4,7 @@ import (
 	"maatplug/internal/attribution"
 	"maatplug/internal/model"
 	"maatplug/internal/operation"
+	"maatplug/internal/provider/codex"
 	"maatplug/internal/reconcile"
 )
 
@@ -51,13 +52,17 @@ func attachInstructionStats(instructions []InstructionView, usage reconcile.Resu
 	}
 	for i := range instructions {
 		key := entityKey(instructions[i].Instruction)
-		if breakdown, ok := tokens[key]; ok {
+		if breakdown, ok := tokens[instructionStatsKey(instructions[i].Instruction)]; ok {
 			breakdown := breakdown
 			instructions[i].Tokens = &breakdown
 		}
 		instructions[i].Activity = instructionActivity(opsByInstruction[key])
 	}
 	return instructions
+}
+
+func instructionStatsKey(ref model.EntityRef) string {
+	return entityKey(codex.CanonicalInstructionRef(ref))
 }
 
 // instructionActivity counts commands run (shell operations) and distinct
@@ -111,7 +116,7 @@ func instructionTokenBreakdowns(usage reconcile.Result, attr attribution.Result)
 
 	agg := map[string]*instructionTokenAgg{}
 	ensure := func(ref model.EntityRef) *instructionTokenAgg {
-		key := entityKey(ref)
+		key := instructionStatsKey(ref)
 		a := agg[key]
 		if a == nil {
 			a = &instructionTokenAgg{complete: true}
@@ -140,7 +145,13 @@ func instructionTokenBreakdowns(usage reconcile.Result, attr attribution.Result)
 			continue
 		}
 		shared := record.Mode == "shared" || record.Mode == "corrected_shared"
+		seen := map[string]bool{}
 		for _, ref := range record.Instructions {
+			key := instructionStatsKey(ref)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
 			a := ensure(ref)
 			a.hasData = true
 			if !bucketsKnown {

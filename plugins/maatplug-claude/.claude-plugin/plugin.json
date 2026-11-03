@@ -1,0 +1,8 @@
+{
+  "name": "maatplug",
+  "version": "0.1.0",
+  "description": "Record Claude Code activity for the maatplug dashboard.",
+  "author": { "name": "coco-papiyon" },
+  "homepage": "https://github.com/coco-papiyon/maatplug",
+  "repository": "https://github.com/coco-papiyon/maatplug"
+}

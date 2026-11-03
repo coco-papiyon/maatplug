@@ -14,6 +14,7 @@ import (
 
 	"maatplug/internal/contentstore"
 	"maatplug/internal/model"
+	"maatplug/internal/provider/claude"
 )
 
 const RuleVersion = "operation-projection-v1"
@@ -496,6 +497,7 @@ func (b *builder) inspectValue(op *Operation, value any, eventID model.Namespace
 func (b *builder) finish() {
 	for index := range b.result.Operations {
 		op := &b.result.Operations[index]
+		b.claudeFileChange(op)
 		if len(op.ObservedEffects) == 0 {
 			op.Missing = append(op.Missing, model.FieldAvailability{Path: "/observedEffects", Status: model.AvailabilityUnknown, Reason: "no operation-correlated effect observation was collected"})
 		}
@@ -556,6 +558,36 @@ func (b *builder) finish() {
 	sort.Slice(b.result.OrphanApprovals, func(i, j int) bool { return idKey(b.result.OrphanApprovals[i]) < idKey(b.result.OrphanApprovals[j]) })
 	sort.Slice(b.result.OrphanArtifacts, func(i, j int) bool { return idKey(b.result.OrphanArtifacts[i]) < idKey(b.result.OrphanArtifacts[j]) })
 	sort.Slice(b.result.OrphanResults, func(i, j int) bool { return idKey(b.result.OrphanResults[i]) < idKey(b.result.OrphanResults[j]) })
+}
+
+// Re-derive from saved tool results so existing journals need no migration.
+// Running once after lifecycle assembly avoids counting hook/transcript copies twice.
+func (b *builder) claudeFileChange(op *Operation) {
+	if op.Provider != "claude" || op.Kind != "edit" || op.FinalStatus != "completed" || len(op.Artifacts) != 0 {
+		return
+	}
+	for _, ref := range op.Output {
+		raw, err := b.contents.Get(ref)
+		if err != nil {
+			continue
+		}
+		change, ok := claude.DecodeFileChange(raw)
+		if !ok {
+			continue
+		}
+		var eventID model.NamespacedID
+		for i := len(op.States) - 1; i >= 0; i-- {
+			if op.States[i].State == "completed" {
+				eventID = op.States[i].EventID
+				break
+			}
+		}
+		files := 1
+		measurement := Measurement{Method: change.Method, Scope: "provider-reported tool result", Added: &change.Added, Removed: &change.Removed, FilesChanged: &files}
+		op.Artifacts = append(op.Artifacts, ArtifactEvidence{Artifact: model.EntityRef{Kind: model.EntityArtifact, ID: model.NamespacedID{Namespace: "claude/tool-edit", Value: op.Operation.ID.Value}}, Kind: "file", Change: change.Change, Content: &ref, EventID: eventID, Measurement: measurement})
+		op.ObservedEffects = append(op.ObservedEffects, Effect{Kind: "file", Value: change.Path, Change: change.Change, Availability: model.AvailabilityProviderReported, ObservationScope: measurement.Scope, Method: measurement.Method, EventID: eventID})
+		return
+	}
 }
 
 func unknownEnvironment(actor model.EntityRef, eventID model.NamespacedID) Environment {

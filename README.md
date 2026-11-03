@@ -14,6 +14,19 @@ Claude Code / Codex の利用状況（指示、ソース変更量、取得可能
 
 ## ビルド
 
+Windows向け配布ZIPは `package.bat` で作成できます（Goが必要です）。
+`dist/maatplug-<version>-windows-amd64.zip` とSHA-256ファイルを出力します。
+ARM64版は `package.bat -Architecture arm64` で作成します。
+Linux版は `package-linux.bat`（amd64）、`package-linux.bat -Architecture arm64` で作成します。
+Linux版は `.tar.gz` とSHA-256ファイルを出力し、`start-web.sh`、各プラグインの
+`install-codex.sh` / `install-claude.sh`、日本語READMEを同梱します。
+展開後は `sh install-codex.sh` / `sh install-claude.sh` で導入し、`sh start-web.sh` で起動します。
+ZIPを展開した配布先ではGoは不要で、同梱の `start-web.bat` からWebを起動できます。
+`install-codex.bat`、`install-claude.bat`、日本語の `README.txt` も同梱します。
+各インストールbatはユーザーPATHに展開先を追加してプラグインをインストールし、
+完了後に再起動・有効化・記録確認の手順を表示します。
+インストール後は展開先を保持してください。詳細は同梱READMEを参照してください。
+
 リポジトリのルートで実行します。
 
 ```sh
@@ -44,7 +57,10 @@ go install ./cmd/maatplug ./cmd/maatplug-web
 
 ## Claude Code プラグイン（hook）のインストール
 
-maatplug は現在、独立したプラグインパッケージではなく、Claude Code の `settings.json` に hook を登録して連携します。
+Windowsの配布ZIPでは `install-claude.bat` でClaude Code Pluginをインストールできます。
+プラグインは `plugins/maatplug-claude` にあります。
+以下はプラグインを使わず、Claude Codeの `settings.json` に直接hookを登録する方法です。
+プラグイン方式と直接登録方式を併用すると二重記録になるため、どちらかを使用してください。
 
 まず登録内容を確認します（この時点ではファイルを変更しません）。
 

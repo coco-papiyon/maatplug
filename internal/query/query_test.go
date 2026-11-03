@@ -15,6 +15,31 @@ import (
 	"maatplug/internal/store"
 )
 
+func TestCatalogRefreshesOldAggregation(t *testing.T) {
+	root := t.TempDir()
+	loadAcceptance(t, root)
+	projection, err := catalog.New(root).RebuildProject("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	projection.AggregationVersion = catalog.AggregationVersion - 1
+	data, err := json.Marshal(projection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := (&store.Store{Root: root}).ProjectCatalogPath("fixture")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := New(root).catalog("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.AggregationVersion != catalog.AggregationVersion {
+		t.Fatal("old derived measurements reused")
+	}
+}
+
 func TestCatalogRepairAndJournalDetails(t *testing.T) {
 	root := t.TempDir()
 	loadAcceptance(t, root)

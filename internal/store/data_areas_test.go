@@ -56,6 +56,45 @@ func TestDataAreas_DefaultCannotBeRemoved(t *testing.T) {
 	}
 }
 
+func TestDataAreaMetadataPersistsAcrossAddRemoveAndRestart(t *testing.T) {
+	s := &Store{Root: t.TempDir()}
+	if _, err := s.UpdateDataAreaMetadata("default", " My PC ", " Alice "); err != nil {
+		t.Fatal(err)
+	}
+	local, err := s.AddDataArea("Shared", t.TempDir(), " Bob ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ssh, err := s.AddSSHDataArea("Server", "existing-alias", "/data/maatplug", "Carol")
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := s.UpdateDataAreaMetadata(ssh.ID, "Build server", "Dave")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Path != ssh.Path || updated.SSHHost != ssh.SSHHost || updated.RemotePath != ssh.RemotePath {
+		t.Fatal("metadata update changed connection settings")
+	}
+	if err := s.RemoveDataArea(local.ID); err != nil {
+		t.Fatal(err)
+	}
+	areas, err := (&Store{Root: s.Root}).ListDataAreas()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(areas) != 2 || areas[0].Name != "My PC" || areas[0].UserName != "Alice" || areas[0].Path != s.Root || areas[1].UserName != "Dave" {
+		t.Fatalf("areas = %+v", areas)
+	}
+	if _, err := s.UpdateDataAreaMetadata("default", "My PC", ""); err != nil {
+		t.Fatal(err)
+	}
+	areas, err = s.ListDataAreas()
+	if err != nil || areas[0].UserName != "" {
+		t.Fatal("username could not be cleared")
+	}
+}
+
 func TestDataAreas_AddSSH(t *testing.T) {
 	root := t.TempDir()
 	s := &Store{Root: root}

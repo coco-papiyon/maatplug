@@ -28,7 +28,7 @@ import (
 
 const (
 	SchemaVersion      = 3
-	AggregationVersion = 1
+	AggregationVersion = 2
 )
 
 type InputCursor struct {

@@ -14,6 +14,20 @@ import (
 
 var phase3TestTime = time.Date(2026, 9, 10, 1, 2, 3, 0, time.UTC)
 
+func TestCanonicalInstructionRefPreservesRunIdentity(t *testing.T) {
+	for _, kind := range []model.EntityKind{model.EntityInstruction, model.EntityRun} {
+		ref := provideradapter.EntityRef(kind, "codex/turn", "turn-1")
+		got := CanonicalInstructionRef(ref)
+		want := ref
+		if kind == model.EntityInstruction {
+			want.ID.Namespace = "codex/instruction"
+		}
+		if got != want {
+			t.Fatalf("canonical reference = %+v; want %+v", got, want)
+		}
+	}
+}
+
 func TestPhase3HookFixtureDecodesAndNormalizes(t *testing.T) {
 	for _, line := range phase3FixtureLines(t, "testdata/phase0/hook-lifecycle.jsonl") {
 		event := phase3HookEventName(t, line.Data)
@@ -39,6 +53,15 @@ func TestPhase3TranscriptUsageAdoptsOnlyPerResponseDeltas(t *testing.T) {
 	}
 	adopted, candidates, total := 0, 0, int64(0)
 	for _, event := range batch.Events {
+		if event.EventType == model.EventModelCall {
+			var call model.ModelCallPayload
+			if err := json.Unmarshal(event.Payload, &call); err != nil {
+				t.Fatal(err)
+			}
+			if call.Instruction.ID.Namespace != "codex/instruction" || call.Instruction.ID.Value != "turn-codex-001" {
+				t.Fatalf("call instruction does not match hook identity: %+v", call.Instruction)
+			}
+		}
 		if event.EventType != model.EventUsageReported {
 			continue
 		}

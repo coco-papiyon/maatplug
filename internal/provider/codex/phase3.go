@@ -385,7 +385,7 @@ func addCodexCall(batch *provideradapter.Batch, scope []model.EntityRef, hook pr
 	response := provideradapter.EntityRef(model.EntityResponse, "codex/response", responseID)
 	payload := model.ModelCallPayload{
 		Call:        provideradapter.EntityRef(model.EntityModelCall, "codex/response", responseID),
-		Instruction: provideradapter.EntityRef(model.EntityInstruction, "codex/turn", firstNonEmptyCodex(hook.TurnID, hook.RunID)),
+		Instruction: provideradapter.EntityRef(model.EntityInstruction, "codex/instruction", firstNonEmptyCodex(hook.TurnID, hook.RunID)),
 		Actor:       provideradapter.EntityRef(model.EntityAgent, "codex/agent", "main"), ActualModel: actualModel, State: "completed", Response: &response,
 	}
 	event, err := provideradapter.NewEvent(ProviderName, "transcript", at, &at, provideradapter.ID("codex/model-call", responseID), model.EventModelCall, scope, payload)
@@ -396,6 +396,16 @@ func addCodexCall(batch *provideradapter.Batch, scope []model.EntityRef, hook pr
 		batch.Events = append(batch.Events, event)
 	}
 	return err
+}
+
+// CanonicalInstructionRef recognizes the instruction namespace emitted by older
+// transcript collectors. Run entities also use codex/turn and must remain intact.
+// This conversion is for derived views; original journal evidence is unchanged.
+func CanonicalInstructionRef(ref model.EntityRef) model.EntityRef {
+	if ref.Kind == model.EntityInstruction && ref.ID.Namespace == "codex/turn" {
+		ref.ID.Namespace = "codex/instruction"
+	}
+	return ref
 }
 
 func addCodexUsage(batch *provideradapter.Batch, scope []model.EntityRef, usageID, targetID string, targetKind model.EntityKind, rawUsage tokenUsage, counter model.CounterKind, adoption model.AdoptionStatus, generation string, at time.Time) error {

@@ -14,9 +14,10 @@ import (
 // DataArea is a maatplug data directory that can be included in the web
 // dashboard. The default area is always the Store's own root.
 type DataArea struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Default bool   `json:"default"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	UserName string `json:"userName,omitempty"`
+	Default  bool   `json:"default"`
 	// Path is always a LOCAL directory this area's data can be read
 	// straight off disk (a *store.Store{Root: Path} works for every kind).
 	// For Kind == DataAreaKindLocal it's exactly what AddDataArea was given
@@ -93,6 +94,12 @@ func (s *Store) ListDataAreas() ([]DataArea, error) {
 	seen := map[string]bool{defaultArea.Path: true}
 	for _, area := range file.Areas {
 		if area.Default || area.ID == "default" {
+			if area.ID == "default" {
+				if name := strings.TrimSpace(area.Name); name != "" {
+					areas[0].Name = name
+				}
+				areas[0].UserName = strings.TrimSpace(area.UserName)
+			}
 			continue
 		}
 		area.Path = filepath.Clean(area.Path)
@@ -107,7 +114,7 @@ func (s *Store) ListDataAreas() ([]DataArea, error) {
 
 // AddDataArea adds an existing directory to the dashboard's read-only view.
 // The directory may be local, a mounted volume, or a UNC/network path.
-func (s *Store) AddDataArea(name, path string) (DataArea, error) {
+func (s *Store) AddDataArea(name, path string, userName ...string) (DataArea, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return DataArea{}, errors.New("data area path is required")
@@ -142,7 +149,10 @@ func (s *Store) AddDataArea(name, path string) (DataArea, error) {
 		}
 	}
 	area := DataArea{ID: dataAreaID(path), Name: name, Path: path, Kind: DataAreaKindLocal}
-	if err := s.saveDataAreas(append(areas[1:], area)); err != nil {
+	if len(userName) > 0 {
+		area.UserName = strings.TrimSpace(userName[0])
+	}
+	if err := s.saveDataAreas(append(areas, area)); err != nil {
 		return DataArea{}, err
 	}
 	return area, nil
@@ -157,7 +167,7 @@ func (s *Store) AddDataArea(name, path string) (DataArea, error) {
 // Host alias the user has already set up in their own ~/.ssh/config
 // (username and key are deliberately not accepted here — see DataArea's
 // SSHHost doc comment).
-func (s *Store) AddSSHDataArea(name, sshHost, remotePath string) (DataArea, error) {
+func (s *Store) AddSSHDataArea(name, sshHost, remotePath string, userName ...string) (DataArea, error) {
 	sshHost = strings.TrimSpace(sshHost)
 	remotePath = strings.TrimSpace(remotePath)
 	if sshHost == "" {
@@ -189,7 +199,10 @@ func (s *Store) AddSSHDataArea(name, sshHost, remotePath string) (DataArea, erro
 	}
 
 	area := DataArea{ID: id, Name: name, Path: cacheDir, Kind: DataAreaKindSSH, SSHHost: sshHost, RemotePath: remotePath}
-	if err := s.saveDataAreas(append(areas[1:], area)); err != nil {
+	if len(userName) > 0 {
+		area.UserName = strings.TrimSpace(userName[0])
+	}
+	if err := s.saveDataAreas(append(areas, area)); err != nil {
 		return DataArea{}, err
 	}
 	return area, nil
@@ -220,14 +233,34 @@ func (s *Store) RemoveDataArea(id string) error {
 			found = true
 			continue
 		}
-		if !area.Default {
-			filtered = append(filtered, area)
-		}
+		filtered = append(filtered, area)
 	}
 	if !found {
 		return os.ErrNotExist
 	}
 	return s.saveDataAreas(filtered)
+}
+
+// UpdateDataAreaMetadata updates labels only; paths and SSH credentials are unchanged.
+func (s *Store) UpdateDataAreaMetadata(id, name, userName string) (DataArea, error) {
+	name, userName = strings.TrimSpace(name), strings.TrimSpace(userName)
+	if name == "" {
+		return DataArea{}, errors.New("display name is required")
+	}
+	areas, err := s.ListDataAreas()
+	if err != nil {
+		return DataArea{}, err
+	}
+	for i := range areas {
+		if areas[i].ID == id {
+			areas[i].Name, areas[i].UserName = name, userName
+			if err := s.saveDataAreas(areas); err != nil {
+				return DataArea{}, err
+			}
+			return areas[i], nil
+		}
+	}
+	return DataArea{}, os.ErrNotExist
 }
 
 func (s *Store) saveDataAreas(areas []DataArea) error {

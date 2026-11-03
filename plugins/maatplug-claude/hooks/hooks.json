@@ -1,0 +1,159 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "timeout": 30,
+            "type": "command",
+            "command": "maatplug hook claude --event SessionStart"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "timeout": 30,
+            "type": "command",
+            "command": "maatplug hook claude --event UserPromptSubmit"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "timeout": 30,
+            "type": "command",
+            "command": "maatplug hook claude --event PreToolUse"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "timeout": 30,
+            "type": "command",
+            "command": "maatplug hook claude --event PermissionRequest"
+          }
+        ]
+      }
+    ],
+    "PermissionDenied": [
+      {
+        "hooks": [
+          {
+            "timeout": 30,
+            "type": "command",
+            "command": "maatplug hook claude --event PermissionDenied"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "timeout": 30,
+            "type": "command",
+            "command": "maatplug hook claude --event PostToolUse"
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "timeout": 30,
+            "type": "command",
+            "command": "maatplug hook claude --event PostToolUseFailure"
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "timeout": 30,
+            "type": "command",
+            "command": "maatplug hook claude --event SubagentStart"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "timeout": 30,
+            "type": "command",
+            "command": "maatplug hook claude --event SubagentStop"
+          }
+        ]
+      }
+    ],
+    "FileChanged": [
+      {
+        "hooks": [
+          {
+            "timeout": 30,
+            "type": "command",
+            "command": "maatplug hook claude --event FileChanged"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "timeout": 30,
+            "type": "command",
+            "command": "maatplug hook claude --event PreCompact"
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "timeout": 30,
+            "type": "command",
+            "command": "maatplug hook claude --event PostCompact"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "timeout": 30,
+            "type": "command",
+            "command": "maatplug hook claude --event Stop"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "timeout": 30,
+            "type": "command",
+            "command": "maatplug hook claude --event SessionEnd"
+          }
+        ]
+      }
+    ]
+  },
+  "description": "Record Claude Code activity in the local maatplug store."
+}

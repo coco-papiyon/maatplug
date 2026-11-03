@@ -84,6 +84,7 @@ func NewServer(s *store.Store, usagePoller usageReader, syncPoller remoteSyncRea
 	mux.HandleFunc("POST /api/usage/refresh", handleUsageRefresh(usagePoller))
 	mux.HandleFunc("GET /api/settings", handleSettings(s, syncPoller))
 	mux.HandleFunc("POST /api/settings/areas", handleAddDataArea(s, syncPoller))
+	mux.HandleFunc("PUT /api/settings/areas/{id}", handleUpdateDataArea(s))
 	mux.HandleFunc("DELETE /api/settings/areas/{id}", handleRemoveDataArea(s, syncPoller))
 	mux.HandleFunc("POST /api/settings/areas/{id}/sync", handleSyncDataArea(syncPoller))
 	mux.HandleFunc("GET /api/settings/app", handleGetAppSettings(s))
@@ -100,13 +101,16 @@ func handleProjects(s *store.Store) http.HandlerFunc {
 		}
 		var summaries []projectSummary
 		for _, area := range areas {
+			if !matchesAreaFilters(area, r) {
+				continue
+			}
 			items, err := query.New(area.store.Root).ListProjects(filterFromQuery(r))
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, err)
 				return
 			}
 			for _, item := range items {
-				summaries = append(summaries, projectSummary{ProjectSummary: item, DataAreaID: area.ID, DataAreaName: area.Name})
+				summaries = append(summaries, projectSummary{ProjectSummary: item, DataAreaID: area.ID, DataAreaName: area.Name, DataAreaUserName: area.UserName})
 			}
 		}
 		if summaries == nil {
@@ -125,13 +129,16 @@ func handleSessions(s *store.Store) http.HandlerFunc {
 		}
 		var summaries []sessionSummary
 		for _, area := range areas {
+			if !matchesAreaFilters(area, r) {
+				continue
+			}
 			items, err := query.New(area.store.Root).Sessions(r.PathValue("id"), filterFromQuery(r))
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, err)
 				return
 			}
 			for _, item := range items {
-				summaries = append(summaries, sessionSummary{SessionSummary: item, DataAreaID: area.ID, DataAreaName: area.Name})
+				summaries = append(summaries, sessionSummary{SessionSummary: item, DataAreaID: area.ID, DataAreaName: area.Name, DataAreaUserName: area.UserName})
 			}
 		}
 		if summaries == nil {
@@ -570,14 +577,22 @@ type dashboardArea struct {
 
 type projectSummary struct {
 	query.ProjectSummary
-	DataAreaID   string `json:"dataAreaId"`
-	DataAreaName string `json:"dataAreaName"`
+	DataAreaID       string `json:"dataAreaId"`
+	DataAreaName     string `json:"dataAreaName"`
+	DataAreaUserName string `json:"dataAreaUserName,omitempty"`
 }
 
 type sessionSummary struct {
 	query.SessionSummary
-	DataAreaID   string `json:"dataAreaId"`
-	DataAreaName string `json:"dataAreaName"`
+	DataAreaID       string `json:"dataAreaId"`
+	DataAreaName     string `json:"dataAreaName"`
+	DataAreaUserName string `json:"dataAreaUserName,omitempty"`
+}
+
+func matchesAreaFilters(area dashboardArea, r *http.Request) bool {
+	q := r.URL.Query()
+	return strings.Contains(strings.ToLower(area.Name), strings.ToLower(strings.TrimSpace(q.Get("areaName")))) &&
+		strings.Contains(strings.ToLower(area.UserName), strings.ToLower(strings.TrimSpace(q.Get("userName"))))
 }
 
 func dashboardAreas(s *store.Store) ([]dashboardArea, error) {
@@ -654,6 +669,7 @@ func handleAddDataArea(s *store.Store, syncPoller remoteSyncReader) http.Handler
 	return func(w http.ResponseWriter, r *http.Request) {
 		var input struct {
 			Name       string `json:"name"`
+			UserName   string `json:"userName"`
 			Kind       string `json:"kind"`
 			Path       string `json:"path"`
 			SSHHost    string `json:"sshHost"`
@@ -665,7 +681,7 @@ func handleAddDataArea(s *store.Store, syncPoller remoteSyncReader) http.Handler
 		}
 
 		if input.Kind != store.DataAreaKindSSH {
-			area, err := s.AddDataArea(strings.TrimSpace(input.Name), strings.TrimSpace(input.Path))
+			area, err := s.AddDataArea(strings.TrimSpace(input.Name), strings.TrimSpace(input.Path), input.UserName)
 			if err != nil {
 				writeError(w, http.StatusBadRequest, err)
 				return
@@ -674,7 +690,7 @@ func handleAddDataArea(s *store.Store, syncPoller remoteSyncReader) http.Handler
 			return
 		}
 
-		area, err := s.AddSSHDataArea(strings.TrimSpace(input.Name), strings.TrimSpace(input.SSHHost), strings.TrimSpace(input.RemotePath))
+		area, err := s.AddSSHDataArea(strings.TrimSpace(input.Name), strings.TrimSpace(input.SSHHost), strings.TrimSpace(input.RemotePath), input.UserName)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err)
 			return
@@ -697,8 +713,31 @@ func handleAddDataArea(s *store.Store, syncPoller remoteSyncReader) http.Handler
 	}
 }
 
-// handleSyncDataArea triggers an immediate sync of one SSH area (the
-// settings page's "sync now" button), outside the regular interval.
+// handleUpdateDataArea edits display metadata for local, SSH and default areas.
+func handleUpdateDataArea(s *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			Name     string `json:"name"`
+			UserName string `json:"userName"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		area, err := s.UpdateDataAreaMetadata(r.PathValue("id"), input.Name, input.UserName)
+		if err != nil {
+			status := http.StatusBadRequest
+			if errors.Is(err, os.ErrNotExist) {
+				status = http.StatusNotFound
+			}
+			writeError(w, status, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, area)
+	}
+}
+
+// handleSyncDataArea triggers a sync outside the regular interval.
 func handleSyncDataArea(syncPoller remoteSyncReader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if syncPoller == nil {

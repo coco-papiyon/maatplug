@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"maatplug/internal/contentstore"
+	"maatplug/internal/cost"
 	"maatplug/internal/model"
 )
 
@@ -22,6 +23,7 @@ type InstructionView struct {
 	Text         string                   `json:"text,omitempty"`
 	Availability model.AvailabilityStatus `json:"availability"`
 	Reason       string                   `json:"reason,omitempty"`
+	FinalAnswer  string                   `json:"finalAnswer,omitempty"`
 	// Tokens and Activity are filled in after construction, by
 	// attachInstructionStats (instruction_stats.go) — they need the
 	// session's reconciled usage/attribution/operations, which
@@ -29,8 +31,11 @@ type InstructionView struct {
 	// could be attributed to this instruction at all (as opposed to
 	// InstructionTokens.Complete, which is false for a known-but-approximate
 	// attribution).
-	Tokens   *InstructionTokens  `json:"tokens,omitempty"`
-	Activity InstructionActivity `json:"activity"`
+	Tokens        *InstructionTokens   `json:"tokens,omitempty"`
+	Activity      InstructionActivity  `json:"activity"`
+	EstimatedCost []cost.CurrencyTotal `json:"estimatedCost"`
+	CostMissing   bool                 `json:"costMissing"`
+	CostShared    bool                 `json:"costShared,omitempty"`
 }
 
 // buildInstructions extracts one InstructionView per instruction.recorded
