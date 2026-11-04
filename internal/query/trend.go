@@ -5,6 +5,7 @@ import (
 	"sort"
 	"time"
 
+	"maatplug/internal/catalog"
 	"maatplug/internal/cost"
 	"maatplug/internal/journal"
 	"maatplug/internal/model"
@@ -57,7 +58,10 @@ func (service *Service) Trend(projectID string, filter Filter) ([]DailyPoint, er
 		// each project's catalog — precomputed once per collect cycle,
 		// see catalog.applyProjectCostPeriods — instead of re-reading and
 		// re-pricing every journal event on every dashboard load.
-		return service.trendPointsFromCatalog(projectID, dates)
+		return service.trendPointsFromCatalog(projectID, dates, "")
+	}
+	if _, err := catalog.ReadProjectList(service.Root); err == nil {
+		return service.trendPointsFromCatalog(projectID, dates, filter.Provider)
 	}
 	rows, unknown, err := service.usageRows(projectID, filter)
 	if err != nil {
@@ -91,39 +95,55 @@ func (service *Service) Trend(projectID string, filter Filter) ([]DailyPoint, er
 // already attributed per day at collect time) rather than re-scanning raw
 // journal events. projectID == "" merges every project in the store, the
 // same scope usageRows uses.
-func (service *Service) trendPointsFromCatalog(projectID string, dates []string) ([]DailyPoint, error) {
-	ids := []string{projectID}
-	if projectID == "" {
-		var err error
-		ids, err = (&store.Store{Root: service.Root}).ListProjectIDs()
-		if err != nil {
-			return nil, err
+func (service *Service) trendPointsFromCatalog(projectID string, dates []string, provider string) ([]DailyPoint, error) {
+	entries := []catalog.ProjectListEntry{}
+	if list, err := catalog.ReadProjectList(service.Root); err == nil {
+		for _, entry := range list.Projects {
+			if projectID == "" || entry.Project.ProjectID == projectID {
+				if provider != "" {
+					row, ok := entry.Providers[provider]
+					if !ok {
+						continue
+					}
+					entry.Project, entry.Periods = row.Project, row.Periods
+				}
+				entries = append(entries, entry)
+			}
+		}
+	} else {
+		// Compatibility until the collector has created the small list index.
+		ids := []string{projectID}
+		if projectID == "" {
+			var err error
+			ids, err = (&store.Store{Root: service.Root}).ListProjectIDs()
+			if err != nil {
+				return nil, err
+			}
+		}
+		for _, id := range ids {
+			paths, err := journal.New(service.Root).ListProjectStreams(id)
+			if err != nil {
+				return nil, err
+			}
+			if len(paths) == 0 {
+				continue
+			}
+			projection, err := service.catalog(id)
+			if err != nil {
+				return nil, err
+			}
+			entries = append(entries, catalog.ProjectListEntry{Project: catalog.ProjectSummary{Usage: catalog.Usage{Unknown: projection.UnknownUsage}}, Periods: projection.Periods})
 		}
 	}
 	byDay := map[string]*pointAccumulator{}
 	unknownProject := false
-	for _, id := range ids {
-		paths, err := journal.New(service.Root).ListProjectStreams(id)
-		if err != nil {
-			return nil, err
-		}
-		if len(paths) == 0 {
-			continue
-		}
-		projection, err := service.catalog(id)
-		if err != nil {
-			return nil, err
-		}
-		unknownProject = unknownProject || projection.UnknownUsage
-		for _, period := range projection.Periods {
+	for _, entry := range entries {
+		unknownProject = unknownProject || entry.Project.Usage.Unknown
+		for _, period := range entry.Periods {
 			acc := ensurePoint(byDay, period.Period)
 			acc.point.TotalTokens += period.KnownUsageTokens
-			if period.UsageMissing {
-				acc.point.UsageMissing = true
-			}
-			if period.CostMissing {
-				acc.point.CostMissing = true
-			}
+			acc.point.UsageMissing = acc.point.UsageMissing || period.UsageMissing
+			acc.point.CostMissing = acc.point.CostMissing || period.CostMissing
 			for _, total := range period.EstimatedCost {
 				addDecimal(acc, total.Currency, total.Amount)
 			}

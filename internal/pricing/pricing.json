@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-03T14:14:37.880602Z",
+  "generatedAt": "2026-11-04T15:11:03.9773123Z",
   "models": [
     {
       "provider": "claude",
@@ -129,7 +129,7 @@
       "cacheWritePerMillion": 0,
       "outputPerMillion": 50,
       "sourceUrl": "https://developers.openai.com/api/docs/models",
-      "retrievedAt": "2026-11-03T14:14:39.8563165Z"
+      "retrievedAt": "2026-11-04T15:11:05.641642Z"
     },
     {
       "provider": "codex",
@@ -139,7 +139,7 @@
       "cacheWritePerMillion": 0,
       "outputPerMillion": 10,
       "sourceUrl": "https://developers.openai.com/api/docs/models",
-      "retrievedAt": "2026-11-03T14:14:39.8563165Z"
+      "retrievedAt": "2026-11-04T15:11:05.641642Z"
     },
     {
       "provider": "codex",
@@ -149,7 +149,7 @@
       "cacheWritePerMillion": 0,
       "outputPerMillion": 5,
       "sourceUrl": "https://developers.openai.com/api/docs/models",
-      "retrievedAt": "2026-11-03T14:14:39.8563165Z"
+      "retrievedAt": "2026-11-04T15:11:05.641642Z"
     },
     {
       "provider": "codex",
@@ -159,7 +159,7 @@
       "cacheWritePerMillion": 0,
       "outputPerMillion": 0.5,
       "sourceUrl": "https://developers.openai.com/api/docs/models",
-      "retrievedAt": "2026-11-03T14:14:39.8563165Z"
+      "retrievedAt": "2026-11-04T15:11:05.641642Z"
     }
   ]
 }

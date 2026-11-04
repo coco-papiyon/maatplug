@@ -176,6 +176,17 @@ func (worker *Collector) runOnce(ctx context.Context) (Stats, error) {
 			touched[projectID] = true
 		}
 	}
+	// Bootstrap or repair list projections in the collector even when no new
+	// inbox records arrived. HTTP requests do not perform this migration.
+	ids, err := (&store.Store{Root: worker.Root}).ListProjectIDs()
+	if err != nil {
+		return stats, err
+	}
+	for _, id := range ids {
+		if !worker.Catalog.ListSummariesReady(id) {
+			touched[id] = true
+		}
+	}
 	projects := make([]string, 0, len(touched))
 	for projectID := range touched {
 		projects = append(projects, projectID)
@@ -186,6 +197,9 @@ func (worker *Collector) runOnce(ctx context.Context) (Stats, error) {
 			return stats, fmt.Errorf("rebuild catalog %s: %w", projectID, err)
 		}
 		stats.Catalogs++
+	}
+	if err := worker.Catalog.RefreshProjectList(); err != nil {
+		return stats, err
 	}
 	return stats, errors.Join(processingErrors...)
 }

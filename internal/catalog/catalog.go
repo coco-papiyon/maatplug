@@ -320,6 +320,9 @@ func (builder *Builder) rebuildProject(projectID string) (ProjectCatalog, error)
 	if err := builder.writeProjection(catalog, runs); err != nil {
 		return ProjectCatalog{}, err
 	}
+	if err := builder.writeListSummaries(catalog, allEvents, activePolicy, activePricingVersion, billingRecords); err != nil {
+		return ProjectCatalog{}, err
+	}
 	return catalog, nil
 }
 

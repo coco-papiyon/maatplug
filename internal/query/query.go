@@ -33,95 +33,19 @@ type Filter struct {
 	Until    time.Time `json:"until,omitempty"`
 }
 
-type Period struct {
-	From *time.Time `json:"from,omitempty"`
-	To   *time.Time `json:"to,omitempty"`
-}
+type Period = catalog.Period
 
-type Usage struct {
-	KnownSubtotal      int64 `json:"knownSubtotal"`
-	DirectTokens       int64 `json:"directTokens"`
-	SharedUnallocated  int64 `json:"sharedUnallocated"`
-	Undecomposed       int64 `json:"undecomposed"`
-	UnattributedTokens int64 `json:"unattributedTokens"`
-	AllocatedEstimate  int64 `json:"allocatedEstimate"`
-	Unknown            bool  `json:"unknown"`
-}
+type Usage = catalog.Usage
 
 // ProjectSummary keeps the original dashboard fields while exposing the
 // accounting boundaries that prevent unknown amounts from looking like zero.
-type ProjectSummary struct {
-	ProjectID                string               `json:"projectId"`
-	Name                     string               `json:"name"`
-	Path                     string               `json:"path"`
-	Sessions                 int                  `json:"sessions"`
-	Instructions             int                  `json:"instructions"`
-	TotalTokens              int64                `json:"totalTokens"`
-	TokensInput              int64                `json:"tokensInput"`
-	TokensOutput             int64                `json:"tokensOutput"`
-	TokensCacheRead          int64                `json:"tokensCacheRead"`
-	TokensCacheCreation      int64                `json:"tokensCacheCreation"`
-	TokenBreakdownComplete   bool                 `json:"tokenBreakdownComplete"`
-	Changes                  ChangeSummary        `json:"changes"`
-	AbandonedInstructions    *int                 `json:"abandonedInstructions,omitempty"`
-	CostUnpricedInstructions int                  `json:"costUnpricedInstructions"`
-	Runs                     int                  `json:"runs"`
-	Calls                    int                  `json:"calls"`
-	Period                   Period               `json:"period"`
-	Usage                    Usage                `json:"usage"`
-	EstimatedCost            []cost.CurrencyTotal `json:"estimatedCost"`
-	CostMissing              bool                 `json:"costMissing"`
-	ActualSpend              billing.Summary      `json:"actualSpend"`
-	ActualSpendScope         string               `json:"actualSpendScope"`
-	Operations               int                  `json:"operations"`
-	Artifacts                int                  `json:"artifacts"`
-	Unresolved               int                  `json:"unresolved"`
-	PricingVersion           string               `json:"pricingVersion,omitempty"`
-	AttributionPolicy        string               `json:"attributionPolicy,omitempty"`
-	Observation              Observation          `json:"observation"`
-	Source                   string               `json:"source"`
-}
+type ProjectSummary = catalog.ProjectSummary
 
-type Observation struct {
-	Events       int      `json:"events"`
-	Streams      int      `json:"streams"`
-	MissingPaths []string `json:"missingPaths"`
-}
+type Observation = catalog.Observation
 
-type SessionSummary struct {
-	Provider                 string               `json:"provider"`
-	SessionID                string               `json:"sessionId"`
-	StartedAt                time.Time            `json:"startedAt,omitempty"`
-	Instructions             int                  `json:"instructions"`
-	TotalTokens              int64                `json:"totalTokens"`
-	TokensInput              int64                `json:"tokensInput"`
-	TokensOutput             int64                `json:"tokensOutput"`
-	TokensCacheRead          int64                `json:"tokensCacheRead"`
-	TokensCacheCreation      int64                `json:"tokensCacheCreation"`
-	TokenBreakdownComplete   bool                 `json:"tokenBreakdownComplete"`
-	Changes                  ChangeSummary        `json:"changes"`
-	AbandonedInstructions    *int                 `json:"abandonedInstructions,omitempty"`
-	CostUnpricedInstructions int                  `json:"costUnpricedInstructions"`
-	Runs                     int                  `json:"runs"`
-	EndedAt                  time.Time            `json:"endedAt,omitempty"`
-	Calls                    int                  `json:"calls"`
-	Usage                    Usage                `json:"usage"`
-	EstimatedCost            []cost.CurrencyTotal `json:"estimatedCost"`
-	CostMissing              bool                 `json:"costMissing"`
-	Operations               int                  `json:"operations"`
-	Artifacts                int                  `json:"artifacts"`
-	Unresolved               int                  `json:"unresolved"`
-	RunSummaries             []catalog.RunSummary `json:"runSummaries"`
-}
+type SessionSummary = catalog.SessionSummary
 
-type ChangeSummary struct {
-	NoEdits      bool                     `json:"noEdits,omitempty"`
-	Added        *int                     `json:"added,omitempty"`
-	Removed      *int                     `json:"removed,omitempty"`
-	FilesChanged *int                     `json:"filesChanged,omitempty"`
-	Availability model.AvailabilityStatus `json:"availability"`
-	Reason       string                   `json:"reason,omitempty"`
-}
+type ChangeSummary = catalog.ChangeSummary
 
 type Detail struct {
 	ProjectID          string                    `json:"projectId"`
@@ -191,6 +115,25 @@ type Service struct {
 func New(root string) *Service { return &Service{Root: root, Now: time.Now} }
 
 func (service *Service) ListProjects(filter Filter) ([]ProjectSummary, error) {
+	if filter.Since.IsZero() && filter.Until.IsZero() {
+		if list, err := catalog.ReadProjectList(service.Root); err == nil {
+			result := make([]ProjectSummary, 0, len(list.Projects))
+			for _, entry := range list.Projects {
+				row := entry.Project
+				if filter.Provider != "" {
+					provider, ok := entry.Providers[filter.Provider]
+					if !ok {
+						continue
+					}
+					row = provider.Project
+				}
+				if !pathWithin(service.Root, row.Path) {
+					result = append(result, row)
+				}
+			}
+			return result, nil
+		}
+	}
 	layout := &store.Store{Root: service.Root}
 	ids, err := layout.ListProjectIDs()
 	if err != nil {
@@ -277,6 +220,18 @@ func (service *Service) Periods(projectID string) ([]PeriodSummary, error) {
 }
 
 func (service *Service) Sessions(projectID string, filter Filter) ([]SessionSummary, error) {
+	if filter.Since.IsZero() && filter.Until.IsZero() {
+		if list, err := catalog.ReadSessionList(service.Root, projectID); err == nil {
+			result := []SessionSummary{}
+			for _, row := range list.Sessions {
+				if filter.Provider == "" || row.Provider == filter.Provider {
+					result = append(result, row)
+				}
+			}
+			sort.Slice(result, func(i, j int) bool { return result[i].StartedAt.After(result[j].StartedAt) })
+			return result, nil
+		}
+	}
 	paths, err := journal.New(service.Root).ListProjectStreams(projectID)
 	if err != nil {
 		return nil, err
@@ -319,32 +274,7 @@ func (service *Service) Sessions(projectID string, filter Filter) ([]SessionSumm
 }
 
 func sessionSummaryFromCatalog(session catalog.Session) SessionSummary {
-	var instructions, calls, artifacts uint64
-	var start, end time.Time
-	for _, run := range session.Runs {
-		instructions += run.InstructionCount
-		calls += run.ModelCallCount
-		artifacts += run.ArtifactCount
-		if !run.FirstReceivedAt.IsZero() && (start.IsZero() || run.FirstReceivedAt.Before(start)) {
-			start = run.FirstReceivedAt
-		}
-		if run.LastReceivedAt.After(end) {
-			end = run.LastReceivedAt
-		}
-	}
-	derived := session.Derivations
-	buckets, complete := tokenBreakdown(derived.Usage)
-	return SessionSummary{
-		Provider: session.Provider, SessionID: session.SessionID, StartedAt: start,
-		Instructions: int(instructions), TotalTokens: derived.Usage.KnownSubtotal,
-		TokensInput: buckets.input, TokensOutput: buckets.output, TokensCacheRead: buckets.cacheRead, TokensCacheCreation: buckets.cacheWrite,
-		TokenBreakdownComplete: complete, Changes: changeSummary(derived.Operations),
-		CostUnpricedInstructions: incompleteCosts(derived.Cost), Runs: len(session.Runs), EndedAt: end,
-		Calls: int(calls), Usage: usageView(derived.Usage, derived.Attribution),
-		EstimatedCost: derived.Cost.KnownTotals, CostMissing: derived.Cost.MissingCost,
-		Operations: len(derived.Operations.Operations), Artifacts: int(artifacts),
-		Unresolved: len(derived.Missing), RunSummaries: session.Runs,
-	}
+	return catalog.SessionSummaryFromCatalog(session)
 }
 
 func (service *Service) ProjectDetail(projectID string, filter Filter) (Detail, error) {
@@ -630,37 +560,7 @@ func (service *Service) derive(projectID, provider, sessionID, runID string, eve
 }
 
 func (service *Service) summaryFromCatalog(projection catalog.ProjectCatalog) (ProjectSummary, error) {
-	name, path, _ := (&store.Store{Root: service.Root}).ProjectMeta(projection.ProjectID)
-	instructions, calls, artifacts := catalogCounts(projection)
-	attr := projection.Derivations.ActiveAttribution
-	buckets, complete := tokenBreakdown(projection.Derivations.Usage)
-	result := ProjectSummary{ProjectID: projection.ProjectID, Name: name, Path: path, Sessions: len(projection.Sessions), Instructions: instructions, TotalTokens: projection.KnownUsageTokens, TokensInput: buckets.input, TokensOutput: buckets.output, TokensCacheRead: buckets.cacheRead, TokensCacheCreation: buckets.cacheWrite, TokenBreakdownComplete: complete, Changes: changeSummary(projection.Derivations.Operations), CostUnpricedInstructions: incompleteCosts(projection.Derivations.ActiveCost), Runs: runCount(projection), Calls: calls, Usage: usageView(projection.Derivations.Usage, attr), EstimatedCost: projection.Derivations.ActiveCost.KnownTotals, CostMissing: projection.Derivations.ActiveCost.MissingCost, Operations: len(projection.Derivations.Operations.Operations), Artifacts: artifacts, PricingVersion: projection.Derivations.ActiveCost.PricingVersion, AttributionPolicy: projection.Derivations.ActivePolicyVersion, Source: "catalog"}
-	result.Period = periodFromCatalog(projection)
-	result.Observation = observationFromCatalog(projection)
-	result.Unresolved = unresolved(projection.Derivations.Operations, projection.Derivations.ActiveCost, attr, result.Observation.MissingPaths)
-	records, err := (billing.Store{Root: service.Root}).List()
-	if err != nil {
-		return ProjectSummary{}, err
-	}
-	entityKeys := map[string]bool{}
-	for _, record := range projection.Derivations.ActiveAttribution.Records {
-		entityKeys[entityKey(record.Usage)] = true
-		entityKeys[entityKey(record.AppliesTo)] = true
-		for _, ref := range record.Instructions {
-			entityKeys[entityKey(ref)] = true
-		}
-		for _, assigned := range record.Assigned {
-			entityKeys[entityKey(assigned.Instruction)] = true
-		}
-	}
-	for _, record := range projection.Derivations.ActiveCost.Records {
-		entityKeys[entityKey(record.Usage)] = true
-		entityKeys[entityKey(record.Call)] = true
-	}
-	records = filterBillingKeys(records, projection.ProjectID, entityKeys)
-	result.ActualSpend, err = billing.Summarize(records)
-	result.ActualSpendScope = "project-or-entity-linked"
-	return result, err
+	return catalog.ProjectSummaryFromCatalog(service.Root, projection)
 }
 
 func (service *Service) summaryFromDetail(projectID string, detail Detail) (ProjectSummary, error) {
